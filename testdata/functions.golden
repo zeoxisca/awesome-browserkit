@@ -1,0 +1,53 @@
+browserOpen(OpenRequest) -> OpenResponse
+启动可复用浏览器 session 并打开一个 HTTP/HTTPS 页面；返回前等待页面空闲，并在 load_status 中报告 loaded 或 timeout。返回 session_id 和 page_id；需要图片时再调用 browserScreenshot。完成操作后用 browserClose 释放 session。
+
+browserTabs(TabsRequest) -> TabsResponse
+列出浏览器 session 中的网页 Tab，并返回当前激活的 page_id。
+
+browserActivateTab(TabRequest) -> TabResponse
+激活指定浏览器 Tab，让后续直播画面和输入切换到该 Tab。
+
+browserCloseTab(TabRequest) -> CloseTabResponse
+关闭浏览器 session 中指定的网页 Tab。
+
+browserNavigate(NavigateRequest) -> NavigateResponse
+在已有浏览器 page 中导航到 HTTP/HTTPS 地址，返回前等待页面空闲。
+
+browserSnapshot(SnapshotRequest) -> SnapshotResponse
+获取页面文本摘要和绑定 revision 的可交互元素引用；先同步 Tab 状态。省略 page_id 时使用最新 active page，并返回 active_page_id、tabs_revision、tabs_changed 和 Tab 摘要；支持 max_elements 限量和 offset 分页，下一页使用 next_offset。
+
+browserClick(ClickRequest) -> ClickResponse
+点击指定 page_id 页面快照中的元素引用。ref 只能用于生成它的 page_id。
+
+browserHover(HoverRequest) -> HoverResponse
+将指针移动到指定 page_id 的快照元素。ref 只能用于生成它的页面。
+
+browserType(TypeRequest) -> TypeResponse
+向指定 page_id 页面元素输入文本。ref 只能用于生成它的 page_id。默认覆盖原值，append=true 时追加。响应不会回显输入内容。
+
+browserPress(PressRequest) -> PressResponse
+向指定 page_id 页面发送白名单按键。
+
+browserWait(WaitRequest) -> WaitResponse
+等待指定 page_id 页面的状态。selector_visible/selector_hidden 可直接使用 browserSnapshot 返回的 ref 或 CSS selector；也支持 url_contains、title_contains、text_contains 和 load_complete。
+
+browserScreenshot(ScreenshotRequest) -> ScreenshotResponse
+把指定 page_id 页面截图保存为宿主可读取的 PNG 文件。
+
+browserAssets(AssetsRequest) -> AssetsResponse
+读取指定 page_id 当前页面已经观测到的资源列表；返回脚本、样式、图片、字体和 XHR/Fetch 等资源的名称、实际地址、发起类型、状态、大小与耗时；可用 host 过滤域名。不会主动爬取未访问页面。
+
+browserClose(CloseRequest) -> CloseResponse
+显式关闭指定浏览器 session。
+
+browserEvaluate(EvaluateRequest) -> EvaluateResponse
+在指定页面的 console 域执行一段 JavaScript，并返回有限 JSON 值。
+
+browserDevtoolsOpen(DevtoolsOpenRequest) -> DevtoolsOpenResponse
+为指定 page_id 按需开启 Console、运行时异常和 Network 元数据采集；重复调用不会清空当前采集。
+
+browserDevtoolsRead(DevtoolsReadRequest) -> DevtoolsReadResponse
+读取指定 page_id 的有界开发诊断记录；支持 generation、after_sequence、kinds 和 limit 增量读取。
+
+browserDevtoolsClose(DevtoolsOpenRequest) -> DevtoolsCloseResponse
+停止指定 page_id 的开发诊断采集，并保留当前有界记录供最后读取。
