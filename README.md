@@ -18,6 +18,17 @@ Awesome browserkit 将 Chrome / Chromium 的页面操作、实时图流和开发
 Agent 可通过 CLI 或 Go 函数读取页面、操作元素和管理 Tab；用户可通过 React 界面观看执行过程、输入内容并接管操作。
 浏览器可以运行在本机或远程服务器上，也可以连接已启用 CDP 调试的浏览器。
 
+## 界面预览
+
+![浏览器嵌入界面：Tab 栏、地址栏、页面图流与输入入口](docs/images/browser-embedded.png)
+
+<details>
+<summary>查看 F12 诊断面板</summary>
+
+![浏览器内的 Network 诊断面板与请求详情](docs/images/browser-diagnostics.png)
+
+</details>
+
 <a id="capabilities"></a>
 
 ## 核心能力

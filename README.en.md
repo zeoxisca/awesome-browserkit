@@ -19,6 +19,17 @@ Agents use the CLI or Go functions to inspect pages, interact with elements, and
 Users can watch execution, enter input, and take control through a React interface.
 The browser can run locally, on a remote server, or as an existing browser with CDP debugging enabled.
 
+## Interface preview
+
+![Embedded browser with tabs, address bar, live page stream, and input controls](docs/images/browser-embedded.png)
+
+<details>
+<summary>View the F12 diagnostics panel</summary>
+
+![Browser Network panel with request and response details](docs/images/browser-diagnostics.png)
+
+</details>
+
 <a id="capabilities"></a>
 
 ## Capabilities
