@@ -13,7 +13,7 @@ race:
 	go test -race ./...
 
 smoke:
-	go test -tags=browser_smoke . ./cmd/browserkit -run 'TestRealBrowserManagerWorkflow|TestRealCLIModes' -count=1 -v
+	go test -tags=browser_smoke . ./cmd/browserkit -run 'TestRealBrowserManagerWorkflow|TestRealBrowserNetworkPolicy|TestRealCLIModes' -count=1 -v
 
 build:
 	go build ./...

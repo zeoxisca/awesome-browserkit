@@ -200,6 +200,48 @@ func TestOriginAndReadOnlyPolicies(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthMiddlewareProtectsHTTPAndWebSocketHandshake(t *testing.T) {
+	m, _, _ := fixture(t)
+	auth := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer test-secret" {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	h := NewHandler(m, Options{AuthMiddleware: auth})
+	w := call(t, h, http.MethodGet, "/state", "", "")
+	if w.Code != http.StatusUnauthorized || w.Header().Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("HTTP auth response=%d headers=%v", w.Code, w.Header())
+	}
+	r := httptest.NewRequest(http.MethodGet, "/state", nil)
+	r.Header.Set("Authorization", "Bearer test-secret")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("authorized HTTP response=%d %s", w.Code, w.Body.String())
+	}
+
+	server := httptest.NewServer(h)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if connection, response, err := websocket.Dial(ctx, server.URL+"/state/ws", nil); err == nil {
+		_ = connection.CloseNow()
+		t.Fatal("unauthorized WebSocket handshake succeeded")
+	} else if response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized WebSocket response=%v err=%v", response, err)
+	}
+	connection, _, err := websocket.Dial(ctx, server.URL+"/state/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": []string{"Bearer test-secret"}}})
+	if err != nil {
+		t.Fatalf("authorized WebSocket handshake failed: %v", err)
+	}
+	_ = connection.CloseNow()
+}
 func TestSharedControlAcrossHandlersAndObserverCannotTakeOver(t *testing.T) {
 	m, _, _ := fixture(t)
 	one := httptest.NewServer(NewHandler(m, Options{}))

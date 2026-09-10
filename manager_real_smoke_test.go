@@ -8,12 +8,63 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestRealBrowserNetworkPolicyBlocksPrivateSubresources(t *testing.T) {
+	var privateRequests atomic.Int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Hostname() {
+		case "public.test":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<!doctype html><title>Policy</title><script>fetch('http://private.test/secret').catch(() => document.body.dataset.blocked = 'true')</script>`))
+		case "private.test":
+			privateRequests.Add(1)
+			_, _ = w.Write([]byte("private data"))
+		default:
+			http.Error(w, "unexpected proxy target", http.StatusBadGateway)
+		}
+	}))
+	defer proxy.Close()
+	manager, err := NewManager(Config{
+		AllowEvaluate: true,
+		DNSResolver: policyResolver{addresses: map[string][]net.IP{
+			"public.test":  {net.ParseIP("93.184.216.34")},
+			"private.test": {net.ParseIP("127.0.0.1")},
+		}},
+		Session: SessionConfig{Proxy: proxy.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background())
+	opened, err := manager.Open(context.Background(), OpenRequest{URL: "http://public.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		state, evaluateErr := manager.Evaluate(context.Background(), EvaluateRequest{
+			SessionID: opened.SessionID,
+			PageID:    opened.PageID,
+			Code:      `document.body.dataset.blocked`,
+		})
+		if evaluateErr == nil && string(state.Value) == `"true"` {
+			if privateRequests.Load() != 0 {
+				t.Fatalf("private subresource reached proxy %d times", privateRequests.Load())
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("browser did not observe the blocked subresource; private requests=%d", privateRequests.Load())
+}
 
 func TestRealBrowserManagerWorkflow(t *testing.T) {
 	mux := http.NewServeMux()

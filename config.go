@@ -60,6 +60,9 @@ type Config struct {
 	MaxResultBytes    int
 	// IdleTimeout 是浏览器 session 无操作后的自动回收时间；零值为 30 分钟。
 	IdleTimeout time.Duration
+	// DNSResolver 用于浏览器请求发出前解析目标主机。省略时使用系统解析器。
+	// 自定义解析器主要用于使用专用 DNS 的宿主和确定性测试。
+	DNSResolver DNSResolver
 	Factory     SessionFactory
 	EventSink   EventSink
 }
@@ -161,6 +164,7 @@ func (config Config) normalized() (Config, error) {
 	if config.Factory == nil {
 		config.Factory = NewSession
 	}
+	config.Session.requestPolicy = newBrowserNetworkPolicy(config.AllowPrivateNetwork, config.AllowedOrigins, config.DNSResolver)
 	if config.ScreenshotDir == "" {
 		config.ScreenshotDir = filepath.Join(os.TempDir(), "browserkit-browser")
 	}

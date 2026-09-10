@@ -30,6 +30,7 @@ type SessionConfig struct {
 	InsecureDomains    []string
 	// OperationTimeout 限制每次 BrowserKit 操作的最长执行时间；省略时使用 30 秒。
 	OperationTimeout time.Duration
+	requestPolicy    *browserNetworkPolicy
 }
 
 // Cookie 是不含敏感值的浏览器 Cookie 元数据。
@@ -80,18 +81,19 @@ type TabReleaseSession interface {
 }
 
 type rodSession struct {
-	browser          *rod.Browser
-	launcher         *launcher.Launcher
-	ownsLauncher     bool
-	cleanup          bool
-	operationTimeout time.Duration
-	cancel           context.CancelFunc
-	transport        *boundedWebSocket
-	attachMu         sync.Mutex
-	pagesMu          sync.Mutex
-	pages            map[proto.TargetTargetID]*rodPage
-	closed           atomic.Bool
-	closeOnce        sync.Once
+	browser           *rod.Browser
+	launcher          *launcher.Launcher
+	ownsLauncher      bool
+	cleanup           bool
+	operationTimeout  time.Duration
+	cancel            context.CancelFunc
+	transport         *boundedWebSocket
+	attachMu          sync.Mutex
+	pagesMu           sync.Mutex
+	pages             map[proto.TargetTargetID]*rodPage
+	closed            atomic.Bool
+	closeOnce         sync.Once
+	stopNetworkPolicy func()
 }
 
 const defaultOperationTimeout = 30 * time.Second
@@ -215,6 +217,18 @@ func NewSession(ctx context.Context, config SessionConfig) (Session, error) {
 		}
 		return nil, fmt.Errorf("连接浏览器: %w", connectErr)
 	}
+	stopNetworkPolicy, policyErr := startBrowserNetworkPolicy(sessionContext, browser, config.requestPolicy)
+	if policyErr != nil {
+		browserCancel()
+		cancel()
+		if transport != nil {
+			_ = transport.Close()
+		}
+		if launch != nil && ownsLauncher {
+			launch.Kill()
+		}
+		return nil, fmt.Errorf("启用浏览器网络策略: %w", policyErr)
+	}
 	// Rod 当前没有下载策略的高层包装，只能使用 CDP Browser 域；调用使用
 	// startupCtx，避免初始化阶段无限等待（此处是初始化期唯一的 Browser
 	// 域 proto 调用）。
@@ -235,7 +249,7 @@ func NewSession(ctx context.Context, config SessionConfig) (Session, error) {
 	}
 	return &rodSession{browser: browser, launcher: launch, ownsLauncher: ownsLauncher,
 		cleanup: config.CleanupUserDataDir && config.UserDataDir != "", operationTimeout: config.OperationTimeout,
-		cancel: cancel, transport: transport, pages: make(map[proto.TargetTargetID]*rodPage)}, nil
+		cancel: cancel, transport: transport, pages: make(map[proto.TargetTargetID]*rodPage), stopNetworkPolicy: stopNetworkPolicy}, nil
 }
 
 func isRemoteAddress(address string) bool {
@@ -560,6 +574,9 @@ func (session *rodSession) Close() error {
 	}
 	session.closeOnce.Do(func() {
 		session.closed.Store(true)
+		if session.stopNetworkPolicy != nil {
+			session.stopNetworkPolicy()
+		}
 		// 先取消所有页面/事件循环使用的 session context，让并发中的
 		// screencast、WaitIdle 和 CDP 请求尽快退出；仅自建浏览器发送 Browser.close。
 		// 否则关闭阶段可能与仍在运行的 target 操作互相等待。

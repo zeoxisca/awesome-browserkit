@@ -22,6 +22,10 @@ import (
 
 // Options 配置浏览器入口；零值允许直播并沿用 Manager 的诊断权限。
 type Options struct {
+	// AuthMiddleware 在所有 HTTP 请求和 WebSocket 握手进入 BrowserKit 前执行。
+	// 宿主可在这里接入 Bearer Token、Cookie Session、mTLS 身份或反向代理认证；
+	// 中间件拒绝请求时不应调用 next。零值不启用认证。
+	AuthMiddleware func(next http.Handler) http.Handler
 	// DisableLiveView 禁用图流及页面交互，只提供已授权诊断。
 	DisableLiveView bool
 	// DisableDevtools 禁用诊断入口。
@@ -38,6 +42,7 @@ type Handler struct {
 	manager *browserkit.Manager
 	options Options
 	mux     *http.ServeMux
+	auth    http.Handler
 }
 
 // NewHandler 注册全部浏览器子路由，不监听端口，也不修改全局 ServeMux。
@@ -61,11 +66,26 @@ func NewHandler(manager *browserkit.Manager, options Options) *Handler {
 	h.mux.HandleFunc("DELETE /tabs/{pageID}/devtools", h.diagnostics)
 	h.mux.HandleFunc("GET /tabs/{pageID}/devtools/ws", h.diagnosticStream)
 	h.mux.HandleFunc("GET /tabs/{pageID}/assets", h.assets)
+	authorized := http.Handler(http.HandlerFunc(h.serveAuthorized))
+	if options.AuthMiddleware != nil {
+		authorized = options.AuthMiddleware(authorized)
+	}
+	h.auth = authorized
 	return h
 }
 
 // ServeHTTP 服务一次浏览器请求；可通过 StripPrefix 挂载到任意路径。
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.auth == nil {
+		fail(w, http.StatusServiceUnavailable, errors.New("浏览器 HTTP Handler 尚未初始化"))
+		return
+	}
+	h.auth.ServeHTTP(w, r)
+}
+
+// serveAuthorized 只在宿主认证中间件允许请求后执行，因此同一认证边界同时
+// 保护普通 HTTP、状态流、诊断流和包含浏览器输入的 WebSocket 握手。
+func (h *Handler) serveAuthorized(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		fail(w, 503, errors.New("浏览器运行时尚未启用"))
 		return
