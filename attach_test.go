@@ -3,6 +3,7 @@ package browserkit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -103,12 +104,46 @@ func (p *focusPage) Evaluate(context.Context, string, EvaluateOptions) (Evaluate
 
 type focusSession struct {
 	*fakeViewportSession
-	pages map[string]*focusPage
+	pages     map[string]*focusPage
+	pageCalls []string
 }
 
 func (s *focusSession) PageForTab(_ context.Context, id string) (Page, error) {
+	s.pageCalls = append(s.pageCalls, id)
 	return s.pages[id], nil
 }
+
+type activeTargetSession struct {
+	*focusSession
+	activeTarget string
+	probeCalls   int
+}
+
+func (s *activeTargetSession) ActiveTab(_ context.Context, listed []TabInfo) (string, error) {
+	s.probeCalls++
+	if len(listed) == 0 {
+		return "", errors.New("missing tabs")
+	}
+	return s.activeTarget, nil
+}
+
+func TestAttachBindsOnlyProbedActiveTab(t *testing.T) {
+	a := &focusPage{fakePage: &fakePage{info: PageInfo{URL: "https://example.com/a"}}}
+	b := &focusPage{fakePage: &fakePage{info: PageInfo{URL: "https://example.com/b"}}}
+	legacy := &focusSession{
+		fakeViewportSession: &fakeViewportSession{fakeSession: &fakeSession{}, tabs: []TabInfo{{TargetID: "a", Type: "page"}, {TargetID: "b", Type: "page"}}},
+		pages:               map[string]*focusPage{"a": a, "b": b},
+	}
+	session := &activeTargetSession{focusSession: legacy, activeTarget: "b"}
+	page, err := attachPage(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page != b || session.probeCalls != 1 || len(session.pageCalls) != 1 || session.pageCalls[0] != "b" {
+		t.Fatalf("page=%p probes=%d bindings=%v", page, session.probeCalls, session.pageCalls)
+	}
+}
+
 func TestAttachActiveTab(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
