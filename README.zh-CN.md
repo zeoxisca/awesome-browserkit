@@ -20,11 +20,25 @@ Agent 可通过 CLI 或 Go 函数读取页面、操作元素和管理 Tab；用�
 
 ## 嵌入效果
 
+`BrowserView` 直接挂载在工作台内容区域中，外侧不再重复套一层浏览器卡片。
+
 <div align="center">
-  <img src="docs/images/browser-embedded.svg" width="100%" alt="BrowserView 嵌入应用后的效果，包含 Tab、地址栏、实时页面与 F12 Network 面板">
+<img src="docs/images/browser-embedded-page.png" width="100%" alt="Agent 工作台中的 BrowserView，右侧实时页面正在点击按钮">
 </div>
 
-`BrowserView` 会直接在宿主应用的容器内渲染浏览器图流、Tab、地址栏、输入控制与诊断面板。
+<details>
+<summary><kbd>F12</kbd> <strong>Developer tools</strong> — 点击开启或关闭</summary>
+<br>
+<img src="docs/images/browser-embedded-network.png" width="100%" alt="同一 Agent 工作台中的 BrowserView 已展开 Network 面板">
+</details>
+
+<details>
+<summary><strong>操作权接管</strong> — 点击显示或隐藏</summary>
+<br>
+<img src="docs/images/browser-embedded-control.png" width="100%" alt="同一 Agent 工作台中的 BrowserView 正在显示接管操作界面">
+</details>
+
+外侧工作台和页面内容用于模拟宿主场景；嵌入面板会在宿主容器内渲染 Tab、地址栏、浏览器输入、操作权接管和诊断面板。[运行可交互 Demo](#demo)。
 
 <a id="capabilities"></a>
 
