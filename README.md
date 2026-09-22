@@ -22,39 +22,10 @@ The browser can run locally, on a remote server, or as an existing browser with 
 ## Embedded experience
 
 <div align="center">
-<table width="100%">
-  <tr>
-    <td colspan="3"><strong>◉ BrowserKit</strong>　<code>Agent Workspace</code></td>
-    <td align="right">● LIVE</td>
-  </tr>
-  <tr>
-    <td align="center">←　↻</td>
-    <td colspan="2"><code>https://example.com/workspace</code></td>
-    <td align="center"><strong>Take control</strong></td>
-  </tr>
-  <tr>
-    <td colspan="3" width="70%" valign="top">
-      <h3>Live browser surface</h3>
-      <p>Rendered by Chrome / Chromium and streamed over WebSocket.</p>
-      <blockquote>The agent is inspecting the page and interacting with a target…</blockquote>
-      <p><code>Mouse</code>　<code>Touch</code>　<code>Keyboard</code>　<code>IME</code></p>
-    </td>
-    <td width="30%" valign="top">
-      <strong>Diagnostics</strong><br><br>
-      Console　Network<br><br>
-      <code>GET /api/items　200</code><br>
-      <code>DOMContentLoaded</code><br>
-      <code>0 errors</code>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">Tab: Workspace</td>
-    <td colspan="2" align="right">1920 × 1080　Controller connected</td>
-  </tr>
-</table>
+  <img src="docs/images/browser-embedded.svg" width="100%" alt="BrowserView embedded in an application, with tabs, address bar, live page, and the F12 Network panel">
 </div>
 
-This repository-native HTML mockup represents the embedded layout. The actual `BrowserView` renders the live browser stream, tabs, address bar, input controls, and diagnostics directly where it is mounted.
+`BrowserView` renders the live browser stream, tabs, address bar, input controls, and diagnostics directly inside the host application's container.
 
 <a id="capabilities"></a>
 

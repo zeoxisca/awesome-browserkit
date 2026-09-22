@@ -21,39 +21,10 @@ Agent 可通过 CLI 或 Go 函数读取页面、操作元素和管理 Tab；用�
 ## 嵌入效果
 
 <div align="center">
-<table width="100%">
-  <tr>
-    <td colspan="3"><strong>◉ BrowserKit</strong>　<code>Agent Workspace</code></td>
-    <td align="right">● LIVE</td>
-  </tr>
-  <tr>
-    <td align="center">←　↻</td>
-    <td colspan="2"><code>https://example.com/workspace</code></td>
-    <td align="center"><strong>接管操作</strong></td>
-  </tr>
-  <tr>
-    <td colspan="3" width="70%" valign="top">
-      <h3>浏览器实时画面</h3>
-      <p>由 Chrome / Chromium 渲染，通过 WebSocket 实时传输。</p>
-      <blockquote>Agent 正在检查页面内容并操作目标元素……</blockquote>
-      <p><code>鼠标</code>　<code>触摸</code>　<code>键盘</code>　<code>中文输入法</code></p>
-    </td>
-    <td width="30%" valign="top">
-      <strong>开发诊断</strong><br><br>
-      Console　Network<br><br>
-      <code>GET /api/items　200</code><br>
-      <code>DOMContentLoaded</code><br>
-      <code>0 errors</code>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2">Tab：Workspace</td>
-    <td colspan="2" align="right">1920 × 1080　控制方已连接</td>
-  </tr>
-</table>
+  <img src="docs/images/browser-embedded.svg" width="100%" alt="BrowserView 嵌入应用后的效果，包含 Tab、地址栏、实时页面与 F12 Network 面板">
 </div>
 
-这是基于 README 原生 HTML 的界面示意；实际 `BrowserView` 会在调用位置嵌入浏览器图流、Tab、地址栏、输入控制与诊断面板。
+`BrowserView` 会直接在宿主应用的容器内渲染浏览器图流、Tab、地址栏、输入控制与诊断面板。
 
 <a id="capabilities"></a>
 
