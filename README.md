@@ -21,11 +21,25 @@ The browser can run locally, on a remote server, or as an existing browser with 
 
 ## Embedded experience
 
+`BrowserView` is mounted directly in the workspace content area—without an extra browser card around it.
+
 <div align="center">
-  <img src="docs/images/browser-embedded.svg" width="100%" alt="BrowserView embedded in an application, with tabs, address bar, live page, and the F12 Network panel">
+<img src="docs/images/browser-embedded-page.png" width="100%" alt="An agent workspace with BrowserView embedded beside the task activity, clicking a button in the live page">
 </div>
 
-`BrowserView` renders the live browser stream, tabs, address bar, input controls, and diagnostics directly inside the host application's container.
+<details>
+<summary><kbd>F12</kbd> <strong>Developer tools</strong> — click to open or close</summary>
+<br>
+<img src="docs/images/browser-embedded-network.png" width="100%" alt="The same agent workspace with the embedded BrowserView Network panel open">
+</details>
+
+<details>
+<summary><strong>Control handoff</strong> — click to show or hide</summary>
+<br>
+<img src="docs/images/browser-embedded-control.png" width="100%" alt="The same agent workspace with BrowserView showing its Take control overlay">
+</details>
+
+The surrounding workspace and page contents are illustrative. The embedded panel renders tabs, the address bar, browser input, control handoff, and diagnostics inside the host application's container. [Run the interactive demo](#demo).
 
 <a id="capabilities"></a>
 
