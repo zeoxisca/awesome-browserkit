@@ -68,6 +68,17 @@ func attachPage(ctx context.Context, browser Session) (Page, error) {
 	if err != nil {
 		return nil, err
 	}
+	if detector, ok := browser.(ActiveTabSession); ok {
+		targetID, err := detector.ActiveTab(ctx, listed)
+		if err != nil {
+			return nil, err
+		}
+		page, err := tabs.PageForTab(ctx, targetID)
+		if err != nil {
+			return nil, fmt.Errorf("绑定激活 Tab: %w", err)
+		}
+		return page, nil
+	}
 	return activePage(ctx, tabs, listed)
 }
 

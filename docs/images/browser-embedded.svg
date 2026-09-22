@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title description">
+  <title id="title">BrowserKit embedded browser interface</title>
+  <desc id="description">A BrowserView styled like the real component, with tabs, an address bar, a live page, and the developer tools panel below it.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#24314a" flood-opacity="0.11"/>
+    </filter>
+    <clipPath id="panel-clip">
+      <rect x="16" y="16" width="1168" height="728" rx="14"/>
+    </clipPath>
+    <clipPath id="page-clip">
+      <rect x="17" y="107" width="1166" height="381"/>
+    </clipPath>
+    <style>
+      text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .ui { fill: #66686b; font-size: 12px; }
+      .small { fill: #898b8d; font-size: 10px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .page-copy { fill: #788377; font-size: 12px; }
+      .dev-head { fill: #76787a; font-size: 10px; }
+      .dev-cell { fill: #595b5e; font-size: 10px; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="760" fill="#ffffff" fill-opacity="0"/>
+  <rect x="16" y="16" width="1168" height="728" rx="14" fill="#ffffff" stroke="#dce1e7" filter="url(#shadow)"/>
+
+  <g clip-path="url(#panel-clip)">
+    <!-- BrowserView tab strip -->
+    <rect x="17" y="17" width="1166" height="47" fill="#f5f7fa"/>
+    <rect x="28" y="24" width="248" height="32" rx="6" fill="#e9ebee"/>
+    <circle cx="42" cy="40" r="3.5" fill="#39a86b"/>
+    <text x="53" y="44" fill="#303236" font-size="12">Fieldnotes · Workspace</text>
+    <path d="M254 36l8 8m0-8l-8 8" fill="none" stroke="#898b8d" stroke-width="1.4" stroke-linecap="round"/>
+    <rect x="282" y="24" width="228" height="32" rx="6" fill="transparent"/>
+    <circle cx="296" cy="40" r="3.5" fill="#9b9c9e"/>
+    <text x="307" y="44" class="ui">Project details</text>
+    <path d="M488 36l8 8m0-8l-8 8" fill="none" stroke="#9b9c9e" stroke-width="1.4" stroke-linecap="round"/>
+    <path d="M529 34v12m-6-6h12" fill="none" stroke="#76787a" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="17" y1="64" x2="1183" y2="64" stroke="#1a1c1f" stroke-opacity="0.06"/>
+
+    <!-- Address toolbar -->
+    <rect x="17" y="65" width="1166" height="41" fill="#f5f7fa"/>
+    <circle cx="35" cy="85.5" r="3.5" fill="#39a86b"/>
+    <rect x="47" y="73" width="1000" height="25" rx="5" fill="#ffffff" stroke="#1a1c1f" stroke-opacity="0.06"/>
+    <path d="M61 80a6 6 0 1 0 1.7 7.7M64 78.5l-3.7 1 .9 3.7" fill="none" stroke="#898b8d" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="78" y="89.5" class="ui mono">http://127.0.0.1:8877/site/</text>
+    <path d="M1028 81l5 4.5-5 4.5m5-4.5h-11" fill="none" stroke="#898b8d" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1071 80l11 11m0-11l-11 11" fill="none" stroke="#898b8d" stroke-width="1.4" stroke-linecap="round"/>
+    <path d="M1110 78l-5 15m9-15l-5 15m-6-10h13m-15 5h13" fill="none" stroke="#76787a" stroke-width="1.25" stroke-linecap="round"/>
+    <rect x="1134" y="75" width="34" height="21" rx="10.5" fill="#ffffff" stroke="#1a1c1f" stroke-opacity="0.08"/>
+    <text x="1142" y="89.5" class="small" fill="#595b5e">F12</text>
+    <line x1="17" y1="106" x2="1183" y2="106" stroke="#1a1c1f" stroke-opacity="0.06"/>
+
+    <!-- Live page surface -->
+    <g clip-path="url(#page-clip)">
+      <rect x="17" y="107" width="1166" height="381" fill="#f5f4f0"/>
+      <rect x="17" y="107" width="1166" height="52" fill="#fafbf7"/>
+      <line x1="17" y1="159" x2="1183" y2="159" stroke="#dcded5"/>
+      <text x="48" y="140" fill="#243629" font-size="17" font-weight="650">◈ Fieldnotes</text>
+      <text x="982" y="139" fill="#7c877b" font-size="11">Workspace</text>
+      <text x="1070" y="139" fill="#7c877b" font-size="11">Projects / 2026</text>
+
+      <text x="78" y="195" fill="#778875" font-size="9" font-weight="700" letter-spacing="2">INPUT AND NAVIGATION</text>
+      <text x="78" y="233" fill="#243629" font-size="30" font-weight="500">Work notes</text>
+      <text x="78" y="258" class="page-copy">Add a note, send a request, or open project details.</text>
+
+      <rect x="78" y="278" width="512" height="182" rx="11" fill="#ffffff" stroke="#dfe3d9"/>
+      <text x="100" y="307" fill="#344936" font-size="14" font-weight="600">New note</text>
+      <text x="100" y="331" fill="#7b8578" font-size="11">Note</text>
+      <rect x="100" y="340" width="468" height="37" rx="6" fill="#ffffff" stroke="#d9dfd1"/>
+      <text x="114" y="363" fill="#a0a89d" font-size="11">Enter a note</text>
+      <rect x="100" y="393" width="77" height="34" rx="6" fill="#364f3b"/>
+      <text x="114" y="414" fill="#ffffff" font-size="11">Save note</text>
+      <rect x="185" y="393" width="103" height="34" rx="6" fill="#e9eee5"/>
+      <text x="203" y="414" fill="#415f42" font-size="11">Test request</text>
+      <text x="100" y="447" fill="#4d7755" font-size="11">Request succeeded</text>
+
+      <rect x="608" y="278" width="514" height="182" rx="11" fill="#ffffff" stroke="#dfe3d9"/>
+      <text x="630" y="307" fill="#344936" font-size="14" font-weight="600">Projects</text>
+      <circle cx="638" cy="332" r="4" fill="#99b58c"/>
+      <text x="652" y="336" fill="#344936" font-size="11">Website redesign</text>
+      <text x="1067" y="336" fill="#91a18c" font-size="10">Done</text>
+      <line x1="630" y1="347" x2="1100" y2="347" stroke="#ecefe7"/>
+      <circle cx="638" cy="363" r="4" fill="#99b58c"/>
+      <text x="652" y="367" fill="#344936" font-size="11">Mobile layout</text>
+      <text x="1067" y="367" fill="#91a18c" font-size="10">Done</text>
+      <line x1="630" y1="378" x2="1100" y2="378" stroke="#ecefe7"/>
+      <circle cx="638" cy="394" r="4" fill="#99b58c"/>
+      <text x="652" y="398" fill="#344936" font-size="11">API testing</text>
+      <text x="1044" y="398" fill="#91a18c" font-size="10">In progress</text>
+      <rect x="630" y="414" width="118" height="30" rx="6" fill="#364f3b"/>
+      <text x="644" y="433" fill="#ffffff" font-size="10">Open project details ↗</text>
+    </g>
+
+    <!-- Real BrowserView uses a horizontal resizer above DevTools -->
+    <rect x="17" y="488" width="1166" height="8" fill="#ffffff"/>
+    <rect x="583" y="491" width="34" height="2" rx="1" fill="#1a1c1f" fill-opacity="0.12"/>
+
+    <!-- DevTools panel -->
+    <rect x="17" y="496" width="1166" height="248" fill="#ffffff"/>
+    <line x1="17" y1="496" x2="1183" y2="496" stroke="#1a1c1f" stroke-opacity="0.08"/>
+    <circle cx="33" cy="513.5" r="3.5" fill="#e02e2a"/>
+    <text x="44" y="517" fill="#303236" font-size="11" font-weight="600">Developer tools</text>
+    <text x="138" y="517" class="ui">Console</text>
+    <text x="201" y="517" fill="#303236" font-size="12">Network</text>
+    <rect x="198" y="529" width="48" height="2" fill="#e25507"/>
+    <text x="264" y="517" class="ui">Resources</text>
+    <text x="1012" y="517" class="small">Collecting</text>
+    <rect x="1091" y="502" width="50" height="23" rx="5" fill="#ffffff" stroke="#1a1c1f" stroke-opacity="0.08"/>
+    <text x="1103" y="517" class="small">Stop</text>
+    <path d="M1155 508l9 9m0-9l-9 9" fill="none" stroke="#898b8d" stroke-width="1.3" stroke-linecap="round"/>
+    <line x1="17" y1="531" x2="1183" y2="531" stroke="#1a1c1f" stroke-opacity="0.05"/>
+
+    <rect x="17" y="532" width="1166" height="34" fill="#f9f9f9"/>
+    <rect x="27" y="537" width="42" height="23" rx="4" fill="#1a1c1f" fill-opacity="0.04" stroke="#1a1c1f" stroke-opacity="0.12"/>
+    <text x="40" y="552" class="small" fill="#3e4043">All</text>
+    <rect x="75" y="537" width="70" height="23" rx="4" fill="transparent" stroke="#1a1c1f" stroke-opacity="0.05"/>
+    <text x="87" y="552" class="small">Fetch/XHR</text>
+    <rect x="151" y="537" width="66" height="23" rx="4" fill="transparent" stroke="#1a1c1f" stroke-opacity="0.05"/>
+    <text x="160" y="552" class="small">Document</text>
+    <rect x="223" y="537" width="50" height="23" rx="4" fill="transparent" stroke="#1a1c1f" stroke-opacity="0.05"/>
+    <text x="235" y="552" class="small">Script</text>
+    <rect x="1035" y="537" width="134" height="23" rx="4" fill="#ffffff" stroke="#1a1c1f" stroke-opacity="0.08"/>
+    <text x="1045" y="552" class="small">Filter requests</text>
+    <line x1="17" y1="566" x2="1183" y2="566" stroke="#1a1c1f" stroke-opacity="0.05"/>
+
+    <rect x="17" y="567" width="1166" height="25" fill="#fafafa"/>
+    <text x="31" y="583" class="dev-head">Name</text>
+    <text x="660" y="583" class="dev-head">Status</text>
+    <text x="740" y="583" class="dev-head">Method</text>
+    <text x="848" y="583" class="dev-head">Type</text>
+    <text x="1000" y="583" class="dev-head">Time</text>
+    <line x1="17" y1="592" x2="1183" y2="592" stroke="#1a1c1f" stroke-opacity="0.05"/>
+
+    <circle cx="33" cy="609" r="3" fill="#39a86b"/>
+    <text x="45" y="613" class="dev-cell mono">status</text>
+    <text x="660" y="613" fill="#367b50" font-size="10" class="mono">200</text>
+    <text x="740" y="613" class="dev-cell mono">GET</text>
+    <text x="848" y="613" class="dev-cell mono">fetch</text>
+    <text x="1000" y="613" class="dev-cell mono">18 ms</text>
+    <line x1="17" y1="626" x2="1183" y2="626" stroke="#1a1c1f" stroke-opacity="0.05"/>
+
+    <circle cx="33" cy="643" r="3" fill="#39a86b"/>
+    <text x="45" y="647" class="dev-cell mono">index.html</text>
+    <text x="660" y="647" fill="#367b50" font-size="10" class="mono">200</text>
+    <text x="740" y="647" class="dev-cell mono">GET</text>
+    <text x="848" y="647" class="dev-cell mono">document</text>
+    <text x="1000" y="647" class="dev-cell mono">11 ms</text>
+    <line x1="17" y1="660" x2="1183" y2="660" stroke="#1a1c1f" stroke-opacity="0.05"/>
+
+    <circle cx="33" cy="677" r="3" fill="#39a86b"/>
+    <text x="45" y="681" class="dev-cell mono">favicon.ico</text>
+    <text x="660" y="681" fill="#367b50" font-size="10" class="mono">200</text>
+    <text x="740" y="681" class="dev-cell mono">GET</text>
+    <text x="848" y="681" class="dev-cell mono">image</text>
+    <text x="1000" y="681" class="dev-cell mono">3 ms</text>
+
+    <rect x="17" y="721" width="1166" height="23" fill="#f9f9f9"/>
+    <line x1="17" y1="721" x2="1183" y2="721" stroke="#1a1c1f" stroke-opacity="0.05"/>
+    <text x="28" y="736" fill="#9b9c9e" font-size="9">3 requests</text>
+    <text x="1117" y="736" fill="#9b9c9e" font-size="9">0 errors</text>
+  </g>
+
+  <rect x="16" y="16" width="1168" height="728" rx="14" fill="none" stroke="#dce1e7"/>
+</svg>

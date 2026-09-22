@@ -68,6 +68,13 @@ type TabSession interface {
 	CloseTab(context.Context, string) error
 }
 
+// ActiveTabSession 可在不为每个 target 创建完整 Page 绑定的情况下探测激活 Tab。
+// Attach 会优先使用该可选能力，且只为最终选中的 target 调用 PageForTab。
+type ActiveTabSession interface {
+	TabSession
+	ActiveTab(context.Context, []TabInfo) (string, error)
+}
+
 // ViewportTabSession 是可为已有 Tab 设置页面视口的可选能力。
 type ViewportTabSession interface {
 	TabSession
@@ -407,6 +414,98 @@ func (session *rodSession) ListTabs(ctx context.Context) ([]TabInfo, error) {
 		tabs = append(tabs, TabInfo{TargetID: string(target.TargetID), URL: target.URL, Title: target.Title, Type: string(target.Type), OpenerID: string(target.OpenerID)})
 	}
 	return tabs, nil
+}
+
+// ActiveTab 使用短生命周期 CDP session 探测页面焦点；探测完成后立即 detach，
+// 避免 PageForTab 为所有候选页安装观察器、初始化输入设备并长期缓存 Page。
+func (session *rodSession) ActiveTab(ctx context.Context, listed []TabInfo) (string, error) {
+	if session == nil || session.closed.Load() || session.browser == nil {
+		return "", newError("session_closed", "浏览器 session 已关闭", "重新调用 browserOpen 创建 session", true)
+	}
+	if err := contextErr(ctx); err != nil {
+		return "", err
+	}
+	operationCtx, operationCancel, err := session.ctx(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer operationCancel()
+	if err := lockInteraction(operationCtx, &session.attachMu); err != nil {
+		return "", err
+	}
+	defer session.attachMu.Unlock()
+
+	visibleTarget := ""
+	visibleCount := 0
+	for _, tab := range listed {
+		if tab.Type != "page" {
+			continue
+		}
+		state, err := session.probeTabState(operationCtx, proto.TargetTargetID(tab.TargetID))
+		if err != nil {
+			return "", fmt.Errorf("读取 Tab 状态: %w", err)
+		}
+		if state.Focused {
+			return tab.TargetID, nil
+		}
+		if state.Visible {
+			visibleTarget = tab.TargetID
+			visibleCount++
+		}
+	}
+	if visibleCount == 1 {
+		return visibleTarget, nil
+	}
+	return "", errors.New("无法唯一确定激活 Tab；请切回目标网页并保持浏览器焦点后重试")
+}
+
+type tabFocusState struct {
+	Focused bool `json:"focused"`
+	Visible bool `json:"visible"`
+}
+
+type targetSessionClient struct {
+	ctx       context.Context
+	browser   *rod.Browser
+	sessionID proto.TargetSessionID
+}
+
+func (client targetSessionClient) GetContext() context.Context         { return client.ctx }
+func (client targetSessionClient) GetSessionID() proto.TargetSessionID { return client.sessionID }
+func (client targetSessionClient) Call(ctx context.Context, sessionID, method string, params any) ([]byte, error) {
+	return client.browser.Call(ctx, sessionID, method, params)
+}
+
+func (session *rodSession) probeTabState(ctx context.Context, targetID proto.TargetTargetID) (state tabFocusState, err error) {
+	attached, err := (proto.TargetAttachToTarget{TargetID: targetID, Flatten: true}).Call(session.browser.Context(ctx))
+	if err != nil {
+		return tabFocusState{}, err
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel, cleanupErr := session.controlCtx(session.browser.GetContext(), 5*time.Second)
+		if cleanupErr == nil {
+			cleanupErr = (proto.TargetDetachFromTarget{SessionID: attached.SessionID}).Call(session.browser.Context(cleanupCtx))
+			cleanupCancel()
+		}
+		if err == nil && cleanupErr != nil {
+			err = fmt.Errorf("释放 Tab 探测 session: %w", cleanupErr)
+		}
+	}()
+	probe := targetSessionClient{ctx: ctx, browser: session.browser, sessionID: attached.SessionID}
+	result, err := (proto.RuntimeEvaluate{
+		Expression:    `({focused: document.hasFocus(), visible: document.visibilityState === "visible"})`,
+		ReturnByValue: true,
+	}).Call(probe)
+	if err != nil {
+		return tabFocusState{}, err
+	}
+	if result.ExceptionDetails != nil || result.Result == nil {
+		return tabFocusState{}, errors.New("页面未返回激活状态")
+	}
+	if err := result.Result.Value.Unmarshal(&state); err != nil {
+		return tabFocusState{}, fmt.Errorf("解析激活页状态: %w", err)
+	}
+	return state, nil
 }
 
 // PageForTab 绑定一个已经存在的网页 target，并安装与 NewPage 相同的页面状态观察器。

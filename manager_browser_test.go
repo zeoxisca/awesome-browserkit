@@ -1104,13 +1104,34 @@ func TestBrowserSnapshotReportsStableTabRevisionAndNewActiveTab(t *testing.T) {
 	if third.TabsRevision <= second.TabsRevision || !third.TabsChanged || third.ActivePageID == first.ActivePageID || third.PageID != third.ActivePageID || len(third.Tabs) != 2 {
 		t.Fatalf("新 Tab 应在 Snapshot 中被发现并成为 active: %+v", third)
 	}
+	stable := third
+	deadline := time.Now().Add(time.Second)
+	for activeTabStatus(stable) != "ready" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+		stable, err = manager.Snapshot(ctx, SnapshotRequest{SessionID: opened.SessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if activeTabStatus(stable) != "ready" {
+		t.Fatalf("新 Tab 没有进入 ready 状态: %+v", stable)
+	}
 	fourth, err := manager.Snapshot(ctx, SnapshotRequest{SessionID: opened.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fourth.TabsRevision != third.TabsRevision || fourth.TabsChanged {
-		t.Fatalf("重复 Snapshot 不应重复报告 Tab 变化: third=%+v fourth=%+v", third, fourth)
+	if fourth.TabsRevision != stable.TabsRevision || fourth.TabsChanged {
+		t.Fatalf("Tab ready 后重复 Snapshot 不应重复报告变化: stable=%+v fourth=%+v", stable, fourth)
 	}
+}
+
+func activeTabStatus(snapshot SnapshotResponse) string {
+	for _, tab := range snapshot.Tabs {
+		if tab.PageID == snapshot.ActivePageID {
+			return tab.Status
+		}
+	}
+	return ""
 }
 
 func TestBrowserInteractionReleasesLockBeforeTabReconcile(t *testing.T) {

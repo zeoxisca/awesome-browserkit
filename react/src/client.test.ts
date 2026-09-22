@@ -36,9 +36,17 @@ describe('browser client',()=>{
  it('decodes frame identity separately from image bytes and rejects invalid headers',async()=>{
    const header=new TextEncoder().encode(JSON.stringify({page_id:'page-a',generation:7,mime:'image/jpeg'}))
    const bytes=new Uint8Array(4+header.length+3);new DataView(bytes.buffer).setUint32(0,header.length);bytes.set(header,4);bytes.set([1,2,3],4+header.length)
-   const frame=await decodeFrame({arrayBuffer:async()=>bytes.buffer} as Blob)
+   const slices:Array<[number,number, string | undefined]>=[]
+   const data={size:bytes.byteLength,slice:(start=0,end=bytes.byteLength,type?:string)=>{
+     slices.push([start,end,type])
+     const part=bytes.slice(start,end)
+     return {size:part.byteLength,type:type||'',arrayBuffer:async()=>part.buffer} as Blob
+   }} as Blob
+   const frame=await decodeFrame(data)
    expect(frame.pageID).toBe('page-a');expect(frame.generation).toBe(7);expect(frame.blob.size).toBe(3)
-   await expect(decodeFrame({arrayBuffer:async()=>new ArrayBuffer(3)} as Blob)).rejects.toThrow('图帧头缺失')
+   expect(frame.blob.type).toBe('image/jpeg')
+   expect(slices).toEqual([[0,4,undefined],[4,4+header.length,undefined],[4+header.length,bytes.byteLength,'image/jpeg']])
+   await expect(decodeFrame({size:3} as Blob)).rejects.toThrow('图帧头缺失')
  })
 
 })

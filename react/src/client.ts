@@ -191,14 +191,15 @@ export interface BrowserFrame {
     generation: number;
 }
 export async function decodeFrame(data: Blob): Promise<BrowserFrame> {
-    const bytes = await data.arrayBuffer();
-    if (bytes.byteLength < 4)
+    if (data.size < 4)
         throw new Error('浏览器图帧头缺失');
-    const length = new DataView(bytes).getUint32(0);
-    if (length > 65536 || length + 4 > bytes.byteLength)
+    const prefix = await data.slice(0, 4).arrayBuffer();
+    const length = new DataView(prefix).getUint32(0);
+    if (length > 65536 || length + 4 > data.size)
         throw new Error('浏览器图帧头无效');
-    const header = JSON.parse(new TextDecoder().decode(bytes.slice(4, 4 + length)));
+    const headerBytes = await data.slice(4, 4 + length).arrayBuffer();
+    const header = JSON.parse(new TextDecoder().decode(headerBytes));
     if (typeof header.page_id !== 'string' || !header.page_id || !Number.isSafeInteger(header.generation) || typeof header.mime !== 'string')
         throw new Error('浏览器图帧身份无效');
-    return { blob: new Blob([bytes.slice(4 + length)], { type: header.mime }), pageID: header.page_id, generation: header.generation };
+    return { blob: data.slice(4 + length, data.size, header.mime), pageID: header.page_id, generation: header.generation };
 }
