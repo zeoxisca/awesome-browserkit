@@ -5,7 +5,7 @@ description: 通过 BrowserKit CLI 操作 Chrome 网页，支持连接已有浏�
 
 # BrowserKit
 
-仓库根目录的 `install.sh` 同时安装 client 与本 Skill。
+仓库根目录的 `install.sh` 同时安装 client 与本 Skill。Codex 使用默认安装；Pi Agent 使用 `./install.sh --agent pi`，并可通过 `/skill:browserkit-cli` 显式加载。
 根据用户指定的浏览器选择模式；连接失败时检查 CDP 地址和目标页，不自动切换到另一个浏览器。
 
 ## 启动

@@ -119,7 +119,7 @@ Run build commands from the repository root and dependency installation commands
 
 ## 1. CLI and Skill
 
-The installer installs both the client and the Agent Skill:
+The installer builds the client and configures its Agent Skill. Codex is the default target:
 
 ```sh
 ./install.sh
@@ -128,8 +128,16 @@ browserkit --version
 ```
 
 The default client directory is `~/.local/bin`.
-The default Skill directory is `${CODEX_HOME:-~/.codex}/skills/browserkit-cli`.
-Override them with `BROWSERKIT_BIN_DIR` and `BROWSERKIT_SKILL_DIR`.
+The default Codex Skill directory is `${CODEX_HOME:-~/.codex}/skills/browserkit-cli`.
+
+Configure the same Skill for Pi Agent, or for both agents:
+
+```sh
+./install.sh --agent pi
+./install.sh --agent all
+```
+
+Pi installs the Skill under `${PI_CODING_AGENT_DIR:-~/.pi/agent}/skills/browserkit-cli`; start a new Pi session and use `/skill:browserkit-cli` to invoke it explicitly. Override destinations with `BROWSERKIT_BIN_DIR`, `BROWSERKIT_CODEX_SKILL_DIR`, or `BROWSERKIT_PI_SKILL_DIR`. The legacy `BROWSERKIT_SKILL_DIR` override remains supported for a selected target.
 Agent usage instructions are in the [Skill](skills/browserkit-cli/SKILL.md).
 
 ### Attach to an existing browser

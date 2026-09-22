@@ -118,7 +118,7 @@ go mod download
 
 ## 1. CLI 与 Skill
 
-安装脚本同时安装 client 和 Agent Skill：
+安装脚本会构建 client 并配置 Agent Skill，默认目标为 Codex：
 
 ```sh
 ./install.sh
@@ -127,7 +127,15 @@ browserkit --version
 ```
 
 默认 client 目录为 `~/.local/bin`，Skill 目录为 `${CODEX_HOME:-~/.codex}/skills/browserkit-cli`。
-用 `BROWSERKIT_BIN_DIR` 和 `BROWSERKIT_SKILL_DIR` 修改安装位置。
+
+配置给 Pi Agent，或同时配置给两个 Agent：
+
+```sh
+./install.sh --agent pi
+./install.sh --agent all
+```
+
+Pi Skill 默认安装到 `${PI_CODING_AGENT_DIR:-~/.pi/agent}/skills/browserkit-cli`；新建 Pi 会话后可用 `/skill:browserkit-cli` 显式调用。使用 `BROWSERKIT_BIN_DIR`、`BROWSERKIT_CODEX_SKILL_DIR` 和 `BROWSERKIT_PI_SKILL_DIR` 修改对应位置；旧的 `BROWSERKIT_SKILL_DIR` 仍可覆盖所选目标的 Skill 目录。
 Agent 操作约定见 [Skill](skills/browserkit-cli/SKILL.md)。
 
 ### 接管已有浏览器
