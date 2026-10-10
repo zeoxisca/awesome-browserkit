@@ -54,7 +54,7 @@ The surrounding workspace and page contents are illustrative. The embedded panel
 | **Remote visual interaction** | The React interface includes tabs, an address bar, mouse, touch, wheel, keyboard, and IME input. Input is executed on the browser host; resulting page changes return through the frame stream. |
 | **Shared viewing and control** | Multiple clients can observe a session, with input coordinated through control ownership. Users can take control, while server-enforced read-only endpoints support observation of agent activity. |
 | **Diagnostics** | Inspect console output, runtime exceptions, network requests, and page resources. The F12 panel provides filtering and details; agents can read records through diagnostic functions. |
-| **Configurable UI** | Configure regions, buttons, input types, keyboard activation, and diagnostic panels per client. Customize appearance and dimensions with CSS variables, classes, and `style`. |
+| **Configurable UI** | Configure regions, buttons, input types, keyboard activation, and diagnostic panels per client. Customize appearance and dimensions with CSS variables, classes, and `style`. Supply a `BrowserSource` for a host's own browser transport. |
 
 The diagnostic panel supports Console, Network, and Resources; it does not currently include Elements editing or JavaScript breakpoints.
 Sessions are held in memory and are not restored after a service restart.
@@ -268,6 +268,7 @@ export function BrowserPanel() {
 ```
 
 See the [React API](react/README.md) for UI, input, and diagnostic options.
+The default `httpBrowserSource` connects to the BrowserKit HTTP/WebSocket endpoint. For a custom transport, pass a `BrowserSource`; `endpoint` then serves as the identifier passed to its methods, and optional `pageID` selects a page when the host manages tabs. To mount an independent React root, run `npm run build:standalone --prefix react`, load `react/standalone/browser.js` and `react/standalone/react.css`, and call the module's `mountBrowserView(element, props)` export.
 The detailed API and Skill documentation are currently in Chinese.
 
 <a id="react-install"></a>

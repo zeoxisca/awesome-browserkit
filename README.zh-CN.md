@@ -264,6 +264,7 @@ export function BrowserPanel() {
 ```
 
 组件区域、输入和诊断配置见 [React API](react/README.md)。
+默认的 `httpBrowserSource` 使用 BrowserKit HTTP/WebSocket 入口。接入宿主已有浏览器传输层时，可传入 `BrowserSource`；此时 `endpoint` 是传给数据源方法的标识，宿主自行管理 Tab 时还可指定 `pageID`。独立挂载 React 根可运行 `npm run build:standalone --prefix react`，加载 `react/standalone/browser.js` 和 `react/standalone/react.css`，再调用模块导出的 `mountBrowserView(element, props)`。
 
 <a id="react-install"></a>
 
