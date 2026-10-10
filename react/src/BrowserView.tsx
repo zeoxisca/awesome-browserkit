@@ -844,7 +844,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     void source.inspectPoint(sessionID, pageID, point.x, point.y).then((element) => {
       if (sequence !== inspectSequence.current || pageID !== activePageRef.current) return
       if (select) { selectionLockedRef.current = true; setInspected(element); setHovered(undefined) }
-      else setHovered(element)
+      else if (!dragStart.current) setHovered(element)
     }).catch((error: Error) => { if (select) setNotice(error.message) })
   }
   const finishArea = (clientX: number, clientY: number) => {
@@ -1369,7 +1369,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
             if (end) setDragArea({ x: Math.min(dragStart.current.x, end.x), y: Math.min(dragStart.current.y, end.y), width: Math.abs(dragStart.current.x - end.x), height: Math.abs(dragStart.current.y - end.y) })
           } else if (onElementSelect && !inspected && !area) inspectAt(event.clientX, event.clientY, false)
         }}
-        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { dragStart.current = { x: point.x, y: point.y }; try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* 继续处理当前指针。 */ } } }}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { inspectSequence.current++; setHovered(undefined); dragStart.current = { x: point.x, y: point.y }; try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* 继续处理当前指针。 */ } } }}
         onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; try { event.currentTarget.releasePointerCapture?.(event.pointerId) } catch { /* 捕获未建立。 */ } if (!finishArea(event.clientX, event.clientY) && onElementSelect) inspectAt(event.clientX, event.clientY, true) } }}
         onClick={(event) => { event.stopPropagation(); if (ignoreInspectClick.current) { ignoreInspectClick.current = false; return } if (inspected || area) clearInspection() }}
         onWheel={(event) => { if (inspected || area) { event.preventDefault(); event.stopPropagation() } }}
@@ -1377,7 +1377,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
         onKeyDown={(event) => { if (event.key === 'Escape') stopInspecting(); event.stopPropagation() }}
       >
         {(dragArea || area) && viewport && <div className="browser-element-inspector-outline browser-element-inspector-area" style={{ left: `${(dragArea || area)!.x / viewport.width * 100}%`, top: `${(dragArea || area)!.y / viewport.height * 100}%`, width: `${(dragArea || area)!.width / viewport.width * 100}%`, height: `${(dragArea || area)!.height / viewport.height * 100}%` }} />}
-        {!area && (inspected || hovered) && viewport && (() => {
+        {!dragArea && !dragStart.current && !area && (inspected || hovered) && viewport && (() => {
           const bounds = (inspected || hovered)!.bounds
           return <div className="browser-element-inspector-outline" style={{ left: `${bounds.x / viewport.width * 100}%`, top: `${bounds.y / viewport.height * 100}%`, width: `${bounds.width / viewport.width * 100}%`, height: `${bounds.height / viewport.height * 100}%` }} />
         })()}

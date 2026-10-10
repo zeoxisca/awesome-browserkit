@@ -1,8 +1,12 @@
 package browserkit
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/png"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -349,6 +353,16 @@ func (manager *Manager) Screenshot(ctx context.Context, request ScreenshotReques
 	if err != nil {
 		return ScreenshotResponse{}, err
 	}
+	if request.Region != nil {
+		if request.FullPage {
+			return ScreenshotResponse{}, errors.New("区域截图不能同时启用 full_page")
+		}
+		screenshot.Data, err = cropScreenshot(screenshot.Data, *request.Region)
+		if err != nil {
+			return ScreenshotResponse{}, err
+		}
+		screenshot.Format = "png"
+	}
 	path, err := manager.screenshotPath(current.id, currentPage.id, manager.sequence.Add(1))
 	if err != nil {
 		return ScreenshotResponse{}, err
@@ -359,6 +373,41 @@ func (manager *Manager) Screenshot(ctx context.Context, request ScreenshotReques
 
 	manager.emit(ctx, Event{Kind: "screenshot_ready", SessionID: current.id, PageID: currentPage.id})
 	return ScreenshotResponse{SessionID: current.id, PageID: currentPage.id, Path: path, Format: screenshot.Format, Bytes: len(screenshot.Data), Data: screenshot.Data}, nil
+}
+
+func cropScreenshot(data []byte, region ScreenshotRegion) ([]byte, error) {
+	values := []float64{region.X, region.Y, region.Width, region.Height, region.ViewportWidth, region.ViewportHeight}
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil, errors.New("区域截图坐标无效")
+		}
+	}
+	if region.X < 0 || region.Y < 0 || region.Width <= 0 || region.Height <= 0 || region.ViewportWidth <= 0 || region.ViewportHeight <= 0 || region.X+region.Width > region.ViewportWidth || region.Y+region.Height > region.ViewportHeight {
+		return nil, errors.New("区域截图超出页面视口")
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	width, height := decoded.Bounds().Dx(), decoded.Bounds().Dy()
+	left := int(math.Floor(region.X / region.ViewportWidth * float64(width)))
+	top := int(math.Floor(region.Y / region.ViewportHeight * float64(height)))
+	right := int(math.Ceil((region.X + region.Width) / region.ViewportWidth * float64(width)))
+	bottom := int(math.Ceil((region.Y + region.Height) / region.ViewportHeight * float64(height)))
+	if left < 0 || top < 0 || right > width || bottom > height || left >= right || top >= bottom {
+		return nil, errors.New("区域截图像素范围无效")
+	}
+	part := image.NewRGBA(image.Rect(0, 0, right-left, bottom-top))
+	for y := top; y < bottom; y++ {
+		for x := left; x < right; x++ {
+			part.Set(x-left, y-top, decoded.At(decoded.Bounds().Min.X+x, decoded.Bounds().Min.Y+y))
+		}
+	}
+	var output bytes.Buffer
+	if err := png.Encode(&output, part); err != nil {
+		return nil, err
+	}
+	return output.Bytes(), nil
 }
 
 // captureScreenshot 保留 Manager 声明的 active Tab。Chrome 会在截图前

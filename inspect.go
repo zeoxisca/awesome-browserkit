@@ -2,6 +2,7 @@ package browserkit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -11,6 +12,15 @@ type InspectPointRequest struct {
 	PageID    string  `json:"page_id"`
 	X         float64 `json:"x"`
 	Y         float64 `json:"y"`
+}
+
+// InspectPointJSON 供不直接依赖选区类型的宿主插件调用同一 ref 登记流程。
+func (manager *Manager) InspectPointJSON(ctx context.Context, sessionID, pageID string, x, y float64) (json.RawMessage, error) {
+	element, err := manager.InspectPoint(ctx, InspectPointRequest{SessionID: sessionID, PageID: pageID, X: x, Y: y})
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(element)
 }
 
 // ElementBounds 是页面视口内的元素边框。
