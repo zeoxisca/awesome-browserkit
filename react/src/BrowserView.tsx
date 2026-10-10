@@ -76,13 +76,14 @@ export interface BrowserViewProps {
  viewerID?: string
  onStateChange?: (state: BrowserViewState) => void
  /** 选择完成后由宿主将元素和批注放入聊天草稿。 */
- onElementSelect?: (value: { pageID: string; element: BrowserInspectedElement; action: string; annotation: string }) => void
+ onElementSelect?: (value: { pageID: string; element: BrowserInspectedElement; annotation: string }) => void
+ onAreaSelect?: (value: { pageID: string; url: string; bounds: { x: number; y: number; width: number; height: number }; viewport: BrowserViewport; image: Blob; annotation: string }) => void
  onError?: (error: Error) => void
 }
 
 export function BrowserView(props: BrowserViewProps) { return <BrowserSurface key={props.endpoint} {...props} /> }
 
-function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageID: selectedPageID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onElementSelect, onError }: BrowserViewProps) {
+function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageID: selectedPageID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onElementSelect, onAreaSelect, onError }: BrowserViewProps) {
  const visible = (name: keyof BrowserControls) => controls !== false && controls?.[name] !== false
  const mouseEnabled = input !== false && input?.mouse !== false
  const touchEnabled = input !== false && input?.touch !== false
@@ -111,11 +112,16 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   const [inspecting, setInspecting] = useState(false)
   const [inspected, setInspected] = useState<BrowserInspectedElement>()
   const [hovered, setHovered] = useState<BrowserInspectedElement>()
-  const [inspectAction, setInspectAction] = useState('分析')
+  const [area, setArea] = useState<{ x: number; y: number; width: number; height: number; image: Blob }>()
+  const [dragArea, setDragArea] = useState<{ x: number; y: number; width: number; height: number }>()
+  const dragStart = useRef<{ x: number; y: number } | undefined>(undefined)
+  const ignoreInspectClick = useRef(false)
   const [annotation, setAnnotation] = useState('')
   const inspectSequence = useRef(0)
   const inspectingRef = useRef(false)
   inspectingRef.current = inspecting
+  const selectionLockedRef = useRef(false)
+  selectionLockedRef.current = Boolean(inspected || area)
   const errorCallback = useRef(onError); errorCallback.current = onError
   useEffect(() => { if (notice) errorCallback.current?.(new Error(notice)) }, [notice])
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null)
@@ -694,7 +700,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   const sendInput = (input: BrowserInput) => {
     // 图流仅用于显示；输入目标只取独立 state 通道确认过的
     // active page，并由 Manager 在入队和投递前再次校验。
-    if (!liveViewEnabled || !browserControllerRef.current || inspectingRef.current) return
+    if (!liveViewEnabled || !browserControllerRef.current || inspectingRef.current && selectionLockedRef.current) return
     if (input.kind === 'mouse' && (input.action === 'wheel' ? !wheelEnabled : !mouseEnabled)) return
     if (input.kind === 'touch' && !touchEnabled) return
     if (['key', 'shortcut', 'composition', 'text'].includes(input.kind) && !keyboardEnabled) return
@@ -818,8 +824,16 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     inspectSequence.current++
     inspectingRef.current = false
     setInspecting(false)
+    clearInspection()
+  }
+  const clearInspection = () => {
+    inspectSequence.current++
+    selectionLockedRef.current = false
     setInspected(undefined)
     setHovered(undefined)
+    setArea(undefined)
+    setDragArea(undefined)
+    dragStart.current = undefined
     setAnnotation('')
   }
   const inspectAt = (clientX: number, clientY: number, select: boolean) => {
@@ -829,9 +843,25 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     const sequence = ++inspectSequence.current
     void source.inspectPoint(sessionID, pageID, point.x, point.y).then((element) => {
       if (sequence !== inspectSequence.current || pageID !== activePageRef.current) return
-      if (select) { setInspected(element); setHovered(undefined) }
+      if (select) { selectionLockedRef.current = true; setInspected(element); setHovered(undefined) }
       else setHovered(element)
     }).catch((error: Error) => { if (select) setNotice(error.message) })
+  }
+  const finishArea = (clientX: number, clientY: number) => {
+    const start = dragStart.current
+    dragStart.current = undefined
+    const end = pointAt(clientX, clientY, true)
+    if (!start || !end || !viewport) return false
+    const bounds = { x: Math.floor(Math.min(start.x, end.x)), y: Math.floor(Math.min(start.y, end.y)), width: Math.ceil(Math.abs(start.x - end.x)), height: Math.ceil(Math.abs(start.y - end.y)) }
+    if (bounds.width < 5 || bounds.height < 5) { setDragArea(undefined); return false }
+    const sourceCanvas = canvasRef.current
+    if (!sourceCanvas) return true
+    const crop = document.createElement('canvas')
+    crop.width = bounds.width
+    crop.height = bounds.height
+    crop.getContext('2d')?.drawImage(sourceCanvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height)
+    crop.toBlob((image) => { if (image) { selectionLockedRef.current = true; setArea({ ...bounds, image }); setInspected(undefined); setHovered(undefined); setDragArea(undefined) } }, 'image/png')
+    return true
   }
   useEffect(() => { stopInspecting() }, [activePageID])
 
@@ -1093,7 +1123,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     const frame = frameRef.current
     if (!frame || !viewport || !wheelEnabled || !liveViewEnabled) return
     const onWheel = (event: WheelEvent) => {
-      if (inspectingRef.current) { event.preventDefault(); return }
+      if (inspectingRef.current && selectionLockedRef.current) { event.preventDefault(); return }
       if (!browserControllerRef.current) return
       const point = pointAt(event.clientX, event.clientY, false)
       if (!point) return
@@ -1331,25 +1361,31 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     >
       {keyboardEnabled && <textarea ref={inputRef} className="browser-live-window-ime" aria-label="浏览器直播键盘输入" tabIndex={-1} autoCapitalize="off" autoCorrect="off" spellCheck={false} onBlur={onInputBlur} inputMode={manualKeyboard && !mobileInputActive ? "none" : "text"} />}
       <canvas ref={canvasRef} className={hasFrame ? 'browser-live-window-canvas-ready' : ''} aria-label="浏览器页面当前画面" />
-      {inspecting && <div className="browser-element-inspector" role="presentation"
-        onPointerMove={(event) => { if (!inspected) inspectAt(event.clientX, event.clientY, false) }}
-        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onClick={(event) => { event.stopPropagation(); if (inspected) stopInspecting(); else inspectAt(event.clientX, event.clientY, true) }}
-        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
-        onTouchStart={(event) => { event.preventDefault(); event.stopPropagation() }}
+      {inspecting && <div className={`browser-element-inspector ${inspected || area ? 'browser-element-inspector-locked' : ''}`} role="presentation"
+        onPointerMove={(event) => {
+          if (dragStart.current) {
+            const end = pointAt(event.clientX, event.clientY, true)
+            if (end) setDragArea({ x: Math.min(dragStart.current.x, end.x), y: Math.min(dragStart.current.y, end.y), width: Math.abs(dragStart.current.x - end.x), height: Math.abs(dragStart.current.y - end.y) })
+          } else if (!inspected && !area) inspectAt(event.clientX, event.clientY, false)
+        }}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { dragStart.current = { x: point.x, y: point.y }; event.currentTarget.setPointerCapture?.(event.pointerId) } }}
+        onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; event.currentTarget.releasePointerCapture?.(event.pointerId); if (!finishArea(event.clientX, event.clientY)) inspectAt(event.clientX, event.clientY, true) } }}
+        onClick={(event) => { event.stopPropagation(); if (ignoreInspectClick.current) { ignoreInspectClick.current = false; return } if (inspected || area) clearInspection() }}
+        onWheel={(event) => { if (inspected || area) { event.preventDefault(); event.stopPropagation() } }}
+        onTouchStart={(event) => { if (inspected || area) event.preventDefault(); event.stopPropagation() }}
         onKeyDown={(event) => { if (event.key === 'Escape') stopInspecting(); event.stopPropagation() }}
       >
-        {(inspected || hovered) && viewport && (() => {
+        {(dragArea || area) && viewport && <div className="browser-element-inspector-outline browser-element-inspector-area" style={{ left: `${(dragArea || area)!.x / viewport.width * 100}%`, top: `${(dragArea || area)!.y / viewport.height * 100}%`, width: `${(dragArea || area)!.width / viewport.width * 100}%`, height: `${(dragArea || area)!.height / viewport.height * 100}%` }} />}
+        {!area && (inspected || hovered) && viewport && (() => {
           const bounds = (inspected || hovered)!.bounds
           return <div className="browser-element-inspector-outline" style={{ left: `${bounds.x / viewport.width * 100}%`, top: `${bounds.y / viewport.height * 100}%`, width: `${bounds.width / viewport.width * 100}%`, height: `${bounds.height / viewport.height * 100}%` }} />
         })()}
-        {inspected ? <div className="browser-element-inspector-card" role="dialog" aria-label="选中页面元素" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
-          <strong>{inspected.name || inspected.role}</strong>
-          <small>{inspected.role} · {inspected.ref}</small>
-          <label>操作<select value={inspectAction} onChange={(event) => setInspectAction(event.target.value)}><option>分析</option><option>点击</option><option>输入</option><option>修改</option></select></label>
+        {(inspected || area) ? <div className="browser-element-inspector-card" role="dialog" aria-label="选中页面内容" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') stopInspecting(); event.stopPropagation() }} onKeyUp={(event) => event.stopPropagation()}>
+          <strong>{area ? '已选区域' : inspected!.name || inspected!.role}</strong>
+          <small>{area ? `${area.width} × ${area.height} 像素` : `${inspected!.role} · ${inspected!.ref}`}</small>
           <label>批注<textarea value={annotation} onChange={(event) => setAnnotation(event.target.value)} placeholder="描述要对这个元素做什么" /></label>
-          <div className="browser-element-inspector-actions"><button type="button" onClick={stopInspecting}>取消</button><button type="button" onClick={() => { onElementSelect?.({ pageID: activePageID!, element: inspected, action: inspectAction, annotation }); stopInspecting() }}>发送到输入栏</button></div>
-        </div> : <span className="browser-element-inspector-hint">点击页面元素以选择 · Esc 退出</span>}
+          <div className="browser-element-inspector-actions"><button type="button" onClick={clearInspection}>取消</button><button type="button" onClick={() => { if (area && viewport) onAreaSelect?.({ pageID: activePageID!, url: pageURL || '', bounds: { x: area.x, y: area.y, width: area.width, height: area.height }, viewport, image: area.image, annotation }); else if (inspected) onElementSelect?.({ pageID: activePageID!, element: inspected, annotation }); clearInspection() }}>确认</button></div>
+        </div> : <span className="browser-element-inspector-hint">点击元素或拖动选择区域 · Esc 退出</span>}
       </div>}
       {visible('keyboard') && keyboardEnabled && liveViewEnabled && hasFrame && controller && <button
         type="button"

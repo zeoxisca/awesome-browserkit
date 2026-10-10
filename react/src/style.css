@@ -240,15 +240,17 @@
   overflow: hidden;
   background: rgba(0, 0, 0, .08);
   cursor: crosshair;
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
 }
+.browserkit .browser-element-inspector-locked { touch-action: none; }
 .browserkit .browser-element-inspector-outline {
   position: absolute;
   pointer-events: none;
   border: 2px solid var(--blue-500);
   background: color-mix(in srgb, var(--blue-300) 15%, transparent);
 }
+.browserkit .browser-element-inspector-area { border-style: dashed; }
 .browserkit .browser-element-inspector-hint {
   position: absolute;
   left: 50%;
