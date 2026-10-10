@@ -1369,8 +1369,8 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
             if (end) setDragArea({ x: Math.min(dragStart.current.x, end.x), y: Math.min(dragStart.current.y, end.y), width: Math.abs(dragStart.current.x - end.x), height: Math.abs(dragStart.current.y - end.y) })
           } else if (onElementSelect && !inspected && !area) inspectAt(event.clientX, event.clientY, false)
         }}
-        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { dragStart.current = { x: point.x, y: point.y }; event.currentTarget.setPointerCapture?.(event.pointerId) } }}
-        onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; event.currentTarget.releasePointerCapture?.(event.pointerId); if (!finishArea(event.clientX, event.clientY) && onElementSelect) inspectAt(event.clientX, event.clientY, true) } }}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { dragStart.current = { x: point.x, y: point.y }; try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* 继续处理当前指针。 */ } } }}
+        onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; try { event.currentTarget.releasePointerCapture?.(event.pointerId) } catch { /* 捕获未建立。 */ } if (!finishArea(event.clientX, event.clientY) && onElementSelect) inspectAt(event.clientX, event.clientY, true) } }}
         onClick={(event) => { event.stopPropagation(); if (ignoreInspectClick.current) { ignoreInspectClick.current = false; return } if (inspected || area) clearInspection() }}
         onWheel={(event) => { if (inspected || area) { event.preventDefault(); event.stopPropagation() } }}
         onTouchStart={(event) => { if (inspected || area) event.preventDefault(); event.stopPropagation() }}
