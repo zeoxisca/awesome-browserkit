@@ -475,6 +475,31 @@ describe('BrowserLiveWindow', () => {
     expect(children.findIndex((child) => child.getAttribute('role') === 'tablist')).toBeLessThan(children.findIndex((child) => child.tagName === 'HEADER'))
   })
 
+  it('keeps a newly active Tab when the host selection has not changed', async () => {
+    const tabs = (active: string) => [
+      { page_id: 'page-a', title: 'A', status: 'ready' as const, active: active === 'page-a' },
+      { page_id: 'page-b', title: 'B', status: 'ready' as const, active: active === 'page-b' },
+    ]
+    mockedFetchBrowserState.mockResolvedValue({
+      available: true, closed: false, active_page_id: 'page-a', tabs_revision: 1, tabs: tabs('page-a'),
+    })
+    const { rerender } = render(<BrowserView endpoint="session-a" pageID="page-a" />)
+    await act(async () => {})
+    await receiveFrame()
+
+    await receiveState({ available: true, closed: false, active_page_id: 'page-b', tabs_revision: 2, tabs: tabs('page-b') })
+    expect(mockedActivateBrowserTab).not.toHaveBeenCalled()
+
+    rerender(<BrowserView endpoint="session-a" pageID="page-b" />)
+    await act(async () => {})
+    expect(mockedActivateBrowserTab).not.toHaveBeenCalled()
+
+    rerender(<BrowserView endpoint="session-a" pageID="page-a" />)
+    await act(async () => {})
+    expect(mockedActivateBrowserTab).toHaveBeenCalledTimes(1)
+    expect(mockedActivateBrowserTab).toHaveBeenCalledWith('session-a', 'page-a', expect.any(String))
+  })
+
   it('debounces the measured side-panel page area into the active remote viewport', async () => {
     let resized: ResizeObserverCallback | undefined
     vi.stubGlobal('ResizeObserver', class implements ResizeObserver {

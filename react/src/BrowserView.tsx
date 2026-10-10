@@ -1169,10 +1169,14 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     }
   }
 
+  const appliedSelectionRef = useRef<{ sessionID: string; pageID: string } | undefined>(undefined)
   useEffect(() => {
-    if (selectedPageID && selectedPageID !== activePageID && browserControl?.controller)
-      void selectTab(selectedPageID)
-  }, [selectedPageID, activePageID, browserControl?.controller])
+    if (!sessionID || !selectedPageID || !browserControl?.controller) return
+    const applied = appliedSelectionRef.current
+    if (applied?.sessionID === sessionID && applied.pageID === selectedPageID) return
+    appliedSelectionRef.current = { sessionID, pageID: selectedPageID }
+    if (selectedPageID !== activePageID) void selectTab(selectedPageID)
+  }, [sessionID, selectedPageID, browserControl?.controller])
 
   const syncAfterNavigation = async (pageID: string) => {
     if (!sessionID) return
@@ -1313,7 +1317,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
           aria-label="浏览器页面地址"
           disabled={!liveViewEnabled || !controller || inspectionLocked}
           value={addressValue}
-          placeholder="输入页面地址"
+          placeholder="输入网址或搜索"
           onFocus={() => { addressEditingRef.current = true }}
           onChange={(event) => setAddressValue(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void navigateAddress() } }}
