@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zeoxisca/awesome-browserkit"
+	"git.in.chaitin.net/xiaochen.zhang/awsome-browserkit"
 	xwebsocket "golang.org/x/net/websocket"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -59,6 +59,7 @@ func NewHandler(manager *browserkit.Manager, options Options) *Handler {
 	h.mux.HandleFunc("POST /tabs/{pageID}/activate", h.tab)
 	h.mux.HandleFunc("POST /tabs/{pageID}/navigate", h.tab)
 	h.mux.HandleFunc("POST /tabs/{pageID}/reload", h.tab)
+	h.mux.HandleFunc("POST /tabs/{pageID}/inspect", h.inspectPoint)
 	h.mux.HandleFunc("PUT /tabs/{pageID}/viewport", h.tab)
 	h.mux.HandleFunc("DELETE /tabs/{pageID}", h.tab)
 	h.mux.HandleFunc("GET /tabs/{pageID}/devtools", h.diagnostics)
@@ -251,6 +252,21 @@ func (h *Handler) tab(w http.ResponseWriter, r *http.Request) {
 		err = h.manager.SetViewport(ctx, browserkit.ViewportRequest{PageID: id, Viewport: v})
 	}
 	result(w, nil, err)
+}
+
+func (h *Handler) inspectPoint(w http.ResponseWriter, r *http.Request) {
+	if !h.live(w) {
+		return
+	}
+	var point struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if !decode(w, r, &point) {
+		return
+	}
+	element, err := h.manager.InspectPoint(r.Context(), browserkit.InspectPointRequest{PageID: r.PathValue("pageID"), X: point.X, Y: point.Y})
+	result(w, element, err)
 }
 func (h *Handler) readDiagnostic(ctx context.Context, page string, after uint64, limit int) (browserkit.BrowserDevtoolsViewState, error) {
 	v, e := h.manager.DevtoolsState(ctx, browserkit.DevtoolsReadRequest{PageID: page, AfterSequence: after, Limit: limit})

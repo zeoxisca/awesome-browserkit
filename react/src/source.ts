@@ -16,6 +16,16 @@ export interface BrowserInputConnection {
   close(): void
 }
 
+/** 页面元素选择结果。bounds 使用页面视口 CSS 像素。 */
+export interface BrowserInspectedElement {
+  ref: string
+  revision: number
+  role: string
+  name?: string
+  url: string
+  bounds: { x: number; y: number; width: number; height: number }
+}
+
 /** 浏览器组件的数据入口。宿主可使用任意传输实现这些操作。 */
 export interface BrowserSource {
   state(sessionID: string): Promise<BrowserViewState>
@@ -28,6 +38,7 @@ export interface BrowserSource {
     close: () => void
   }): BrowserInputConnection
   activate(sessionID: string, pageID: string, viewerID: string): Promise<void>
+  inspectPoint(sessionID: string, pageID: string, x: number, y: number): Promise<BrowserInspectedElement>
   navigate(sessionID: string, pageID: string, url: string, viewerID: string): Promise<void>
   reload(sessionID: string, pageID: string, viewerID: string): Promise<void>
   newTab(sessionID: string, viewerID: string): Promise<void>
@@ -80,6 +91,13 @@ export const httpBrowserSource: BrowserSource = {
     return socket
   },
   activate: (sessionID, pageID, viewerID) => activateBrowserTab(sessionID, pageID, viewerID),
+  inspectPoint: async (sessionID, pageID, x, y) => {
+    const response = await fetch(`${sessionID.replace(/\/$/, '')}/tabs/${encodeURIComponent(pageID)}/inspect`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ x, y }), credentials: 'include',
+    })
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || '元素选择失败')
+    return response.json() as Promise<BrowserInspectedElement>
+  },
   navigate: (sessionID, pageID, url, viewerID) => navigateBrowserTab(sessionID, pageID, url, viewerID),
   reload: (sessionID, pageID, viewerID) => reloadBrowserTab(sessionID, pageID, viewerID),
   newTab: (sessionID, viewerID) => newBrowserTab(sessionID, viewerID),

@@ -1,7 +1,7 @@
-import { Plus, Code2, ArrowRight, Keyboard, RefreshCw, X } from 'lucide-react'
+import { Plus, Code2, ArrowRight, Keyboard, RefreshCw, X, MousePointer2 } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { type BrowserControlState, type BrowserTabView, type BrowserViewState } from './client'
-import { httpBrowserSource, type BrowserInputConnection, type BrowserSource } from './source'
+import { httpBrowserSource, type BrowserInputConnection, type BrowserSource, type BrowserInspectedElement } from './source'
 import { BrowserDevtoolsPanel } from './BrowserDevtoolsPanel'
 import type { BrowserControls, BrowserInputOptions, BrowserDevtoolsOptions } from './options'
 
@@ -75,12 +75,14 @@ export interface BrowserViewProps {
  viewport?: 'container' | { width: number; height: number }
  viewerID?: string
  onStateChange?: (state: BrowserViewState) => void
+ /** 选择完成后由宿主将元素和批注放入聊天草稿。 */
+ onElementSelect?: (value: { pageID: string; element: BrowserInspectedElement; action: string; annotation: string }) => void
  onError?: (error: Error) => void
 }
 
 export function BrowserView(props: BrowserViewProps) { return <BrowserSurface key={props.endpoint} {...props} /> }
 
-function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageID: selectedPageID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onError }: BrowserViewProps) {
+function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageID: selectedPageID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onElementSelect, onError }: BrowserViewProps) {
  const visible = (name: keyof BrowserControls) => controls !== false && controls?.[name] !== false
  const mouseEnabled = input !== false && input?.mouse !== false
  const touchEnabled = input !== false && input?.touch !== false
@@ -106,6 +108,14 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const [notice, setNotice] = useState<string>()
+  const [inspecting, setInspecting] = useState(false)
+  const [inspected, setInspected] = useState<BrowserInspectedElement>()
+  const [hovered, setHovered] = useState<BrowserInspectedElement>()
+  const [inspectAction, setInspectAction] = useState('分析')
+  const [annotation, setAnnotation] = useState('')
+  const inspectSequence = useRef(0)
+  const inspectingRef = useRef(false)
+  inspectingRef.current = inspecting
   const errorCallback = useRef(onError); errorCallback.current = onError
   useEffect(() => { if (notice) errorCallback.current?.(new Error(notice)) }, [notice])
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null)
@@ -684,7 +694,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   const sendInput = (input: BrowserInput) => {
     // 图流仅用于显示；输入目标只取独立 state 通道确认过的
     // active page，并由 Manager 在入队和投递前再次校验。
-    if (!liveViewEnabled || !browserControllerRef.current) return
+    if (!liveViewEnabled || !browserControllerRef.current || inspectingRef.current) return
     if (input.kind === 'mouse' && (input.action === 'wheel' ? !wheelEnabled : !mouseEnabled)) return
     if (input.kind === 'touch' && !touchEnabled) return
     if (['key', 'shortcut', 'composition', 'text'].includes(input.kind) && !keyboardEnabled) return
@@ -804,6 +814,27 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     return { x, y, scaleX: viewport.width / width, scaleY: viewport.height / height }
   }
 
+  const stopInspecting = () => {
+    inspectSequence.current++
+    inspectingRef.current = false
+    setInspecting(false)
+    setInspected(undefined)
+    setHovered(undefined)
+    setAnnotation('')
+  }
+  const inspectAt = (clientX: number, clientY: number, select: boolean) => {
+    const point = pointAt(clientX, clientY, false)
+    const pageID = activePageRef.current
+    if (!point || !pageID) return
+    const sequence = ++inspectSequence.current
+    void source.inspectPoint(sessionID, pageID, point.x, point.y).then((element) => {
+      if (sequence !== inspectSequence.current || pageID !== activePageRef.current) return
+      if (select) { setInspected(element); setHovered(undefined) }
+      else setHovered(element)
+    }).catch((error: Error) => { if (select) setNotice(error.message) })
+  }
+  useEffect(() => { stopInspecting() }, [activePageID])
+
   const modifiers = (event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) =>
     (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
 
@@ -890,12 +921,14 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   }
 
   const onPageTouch = (action: 'start' | 'move' | 'end' | 'cancel', event: React.TouchEvent<HTMLDivElement>) => {
+    if (inspecting) { event.preventDefault(); return }
     if (!touchEnabled || !browserControllerRef.current || !liveViewEnabled || (event.target as HTMLElement).closest('button')) return
     event.preventDefault()
     touchInput(action, event)
   }
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspecting) { event.preventDefault(); return }
 
     // 触摸统一由 TouchEvent 处理。荣耀等 Android WebView 会同时派发
     // PointerEvent 与 TouchEvent，若两条路径并存会产生重复 touchStart。
@@ -923,6 +956,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   }
 
   const onPagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspecting) return
     if (!mouseEnabled || !browserControllerRef.current || !liveViewEnabled || event.pointerType === 'touch') return
     const captured = event.currentTarget.hasPointerCapture?.(event.pointerId) || false
     const coalesced = event.nativeEvent.getCoalescedEvents?.()
@@ -941,6 +975,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   }
 
   const finishPagePointer = (_action: 'up' | 'cancel', event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspecting) { event.preventDefault(); return }
 
     if (!mouseEnabled || !browserControllerRef.current || !liveViewEnabled || event.pointerType === 'touch') return
     const point = pointAt(event.clientX, event.clientY, true)
@@ -958,6 +993,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   }
 
   const sendKey = (action: 'down' | 'up', event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (inspecting) { if (event.key === 'Escape' && action === 'down') stopInspecting(); event.preventDefault(); return }
     if (!keyboardEnabled || !browserControllerRef.current) return
     if (composingRef.current || event.key === 'Process' || event.keyCode === 229) return
     const keyTokens = Array.from(new Set([event.code?.toLowerCase(), event.key.toLowerCase()].filter(Boolean) as string[]))
@@ -1057,6 +1093,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     const frame = frameRef.current
     if (!frame || !viewport || !wheelEnabled || !liveViewEnabled) return
     const onWheel = (event: WheelEvent) => {
+      if (inspectingRef.current) { event.preventDefault(); return }
       if (!browserControllerRef.current) return
       const point = pointAt(event.clientX, event.clientY, false)
       if (!point) return
@@ -1225,7 +1262,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   const showToolbar = showAddress || showReload || showClose || showDevtools
   const takeoverSeconds = Math.ceil(controlRetryAfterMS / 1000)
 
-  const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
+  const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (inspecting) return; if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
     {busy && <div className="browser-live-busy-overlay" role="status">Agent 正在操作浏览器…</div>}
     {visible('tabs') && <div data-part="tabs" className={`browser-live-tab-list ${classNames?.tabs || ''}`} role="tablist" aria-label="浏览器 Tab 列表" inert={busy || closing || undefined}>
       {tabs.length === 0 && <span className="browser-live-tab-empty">没有可用页面</span>}
@@ -1258,6 +1295,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
       <div>
         {showClose && <button type="button" aria-label="关闭浏览器" disabled={!browserControl?.controller || closing} onClick={() => void close()}><X size={14} /></button>}
         {showDevtools && <button type="button" aria-label="切换开发诊断 F12" aria-pressed={devtoolsPanelOpen} onClick={() => devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel()}><Code2 size={15} /></button>}
+        {onElementSelect && <button type="button" aria-label="选择页面元素" aria-pressed={inspecting} disabled={!controller || !hasFrame || busy} onClick={() => { if (inspecting) stopInspecting(); else { clearKeyboardState(); inputRef.current?.blur(); inspectingRef.current = true; setInspecting(true) } }}><MousePointer2 size={15} /></button>}
       </div>
     </header>}
     {<div className={`browser-live-panel-body browser-live-panel-${mobilePanel}`} inert={busy || closing || undefined} style={devtoolsHeight ? { '--browser-devtools-height': devtoolsHeight } as CSSProperties : undefined}>
@@ -1293,6 +1331,26 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     >
       {keyboardEnabled && <textarea ref={inputRef} className="browser-live-window-ime" aria-label="浏览器直播键盘输入" tabIndex={-1} autoCapitalize="off" autoCorrect="off" spellCheck={false} onBlur={onInputBlur} inputMode={manualKeyboard && !mobileInputActive ? "none" : "text"} />}
       <canvas ref={canvasRef} className={hasFrame ? 'browser-live-window-canvas-ready' : ''} aria-label="浏览器页面当前画面" />
+      {inspecting && <div className="browser-element-inspector" role="presentation"
+        onPointerMove={(event) => { if (!inspected) inspectAt(event.clientX, event.clientY, false) }}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onClick={(event) => { event.stopPropagation(); if (inspected) stopInspecting(); else inspectAt(event.clientX, event.clientY, true) }}
+        onWheel={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onTouchStart={(event) => { event.preventDefault(); event.stopPropagation() }}
+        onKeyDown={(event) => { if (event.key === 'Escape') stopInspecting(); event.stopPropagation() }}
+      >
+        {(inspected || hovered) && viewport && (() => {
+          const bounds = (inspected || hovered)!.bounds
+          return <div className="browser-element-inspector-outline" style={{ left: `${bounds.x / viewport.width * 100}%`, top: `${bounds.y / viewport.height * 100}%`, width: `${bounds.width / viewport.width * 100}%`, height: `${bounds.height / viewport.height * 100}%` }} />
+        })()}
+        {inspected ? <div className="browser-element-inspector-card" role="dialog" aria-label="选中页面元素" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
+          <strong>{inspected.name || inspected.role}</strong>
+          <small>{inspected.role} · {inspected.ref}</small>
+          <label>操作<select value={inspectAction} onChange={(event) => setInspectAction(event.target.value)}><option>分析</option><option>点击</option><option>输入</option><option>修改</option></select></label>
+          <label>批注<textarea value={annotation} onChange={(event) => setAnnotation(event.target.value)} placeholder="描述要对这个元素做什么" /></label>
+          <div className="browser-element-inspector-actions"><button type="button" onClick={stopInspecting}>取消</button><button type="button" onClick={() => { onElementSelect?.({ pageID: activePageID!, element: inspected, action: inspectAction, annotation }); stopInspecting() }}>发送到输入栏</button></div>
+        </div> : <span className="browser-element-inspector-hint">点击页面元素以选择 · Esc 退出</span>}
+      </div>}
       {visible('keyboard') && keyboardEnabled && liveViewEnabled && hasFrame && controller && <button
         type="button"
         className="browser-live-window-mobile-input"

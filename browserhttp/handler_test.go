@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zeoxisca/awesome-browserkit"
+	"git.in.chaitin.net/xiaochen.zhang/awsome-browserkit"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 )
