@@ -1284,6 +1284,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
 
   const activeTab = tabs.find((tab) => tab.page_id === activePageID)
   const controller = !readOnly && !busy && !closing && browserControl?.controller === true
+  const inspectionLocked = inspecting && Boolean(inspected || area)
   const showAddress = visible('toolbar') && visible('addressBar')
   const showReload = visible('toolbar') && visible('reload')
   const showNavigate = showAddress && visible('navigate')
@@ -1294,7 +1295,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
 
   const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (inspecting) return; if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
     {busy && <div className="browser-live-busy-overlay" role="status">Agent 正在操作浏览器…</div>}
-    {visible('tabs') && <div data-part="tabs" className={`browser-live-tab-list ${classNames?.tabs || ''}`} role="tablist" aria-label="浏览器 Tab 列表" inert={busy || closing || undefined}>
+    {visible('tabs') && <div data-part="tabs" className={`browser-live-tab-list ${classNames?.tabs || ''}`} role="tablist" aria-label="浏览器 Tab 列表" inert={busy || closing || inspectionLocked || undefined}>
       {tabs.length === 0 && <span className="browser-live-tab-empty">没有可用页面</span>}
       {tabs.map((tab) => <div key={tab.page_id} data-part="tab" className={`browser-live-tab-row ${classNames?.tab || ''} ${tab.page_id === activePageID ? 'browser-live-tab-row-active' : ''} ${tab.status === 'loading' ? 'browser-live-tab-row-loading' : ''}`}>
         <button type="button" role="tab" disabled={!liveViewEnabled || !controller} aria-selected={tab.page_id === activePageID} aria-busy={tab.status === 'loading' || undefined} onClick={() => void selectTab(tab.page_id)} title={tab.url || tab.title || tab.page_id}>
@@ -1310,7 +1311,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
         {showAddress && <i aria-hidden="true" />}
         {showAddress && <input
           aria-label="浏览器页面地址"
-          disabled={!liveViewEnabled || !controller}
+          disabled={!liveViewEnabled || !controller || inspectionLocked}
           value={addressValue}
           placeholder="输入页面地址"
           onFocus={() => { addressEditingRef.current = true }}
@@ -1319,13 +1320,13 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
           onBlur={() => { addressEditingRef.current = false; if (!addressValue.trim()) setAddressValue(pageURL || '') }}
           title={pageURL || '浏览器直播'}
         />}
-        {showReload && <button type="button" aria-label="刷新当前页面" disabled={!liveViewEnabled || !controller || !activePageID} onClick={() => void reloadActivePage()}><RefreshCw size={13} /></button>}
-        {showNavigate && <button type="button" aria-label="前往页面" disabled={!liveViewEnabled || !controller || !activePageID || !addressValue.trim()} onClick={() => void navigateAddress()}><ArrowRight size={13} /></button>}
+        {showReload && <button type="button" aria-label="刷新当前页面" disabled={!liveViewEnabled || !controller || !activePageID || inspectionLocked} onClick={() => void reloadActivePage()}><RefreshCw size={13} /></button>}
+        {showNavigate && <button type="button" aria-label="前往页面" disabled={!liveViewEnabled || !controller || !activePageID || !addressValue.trim() || inspectionLocked} onClick={() => void navigateAddress()}><ArrowRight size={13} /></button>}
       </div>
       <div>
-        {showClose && <button type="button" aria-label="关闭浏览器" disabled={!browserControl?.controller || closing} onClick={() => void close()}><X size={14} /></button>}
+        {showClose && <button type="button" aria-label="关闭浏览器" disabled={!browserControl?.controller || closing || inspectionLocked} onClick={() => void close()}><X size={14} /></button>}
         {showDevtools && <button type="button" aria-label="切换开发诊断 F12" aria-pressed={devtoolsPanelOpen} onClick={() => devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel()}><Code2 size={15} /></button>}
-        {onElementSelect && <button type="button" aria-label="选择页面元素" aria-pressed={inspecting} disabled={!controller || !hasFrame || busy} onClick={() => { if (inspecting) stopInspecting(); else { clearKeyboardState(); inputRef.current?.blur(); inspectingRef.current = true; setInspecting(true) } }}><MousePointer2 size={15} /></button>}
+        {(onElementSelect || onAreaSelect) && <button type="button" aria-label="选择页面元素" aria-pressed={inspecting} disabled={!controller || !hasFrame || busy} onClick={() => { if (inspecting) stopInspecting(); else { clearKeyboardState(); inputRef.current?.blur(); inspectingRef.current = true; setInspecting(true) } }}><MousePointer2 size={15} /></button>}
       </div>
     </header>}
     {<div className={`browser-live-panel-body browser-live-panel-${mobilePanel}`} inert={busy || closing || undefined} style={devtoolsHeight ? { '--browser-devtools-height': devtoolsHeight } as CSSProperties : undefined}>
@@ -1366,10 +1367,10 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
           if (dragStart.current) {
             const end = pointAt(event.clientX, event.clientY, true)
             if (end) setDragArea({ x: Math.min(dragStart.current.x, end.x), y: Math.min(dragStart.current.y, end.y), width: Math.abs(dragStart.current.x - end.x), height: Math.abs(dragStart.current.y - end.y) })
-          } else if (!inspected && !area) inspectAt(event.clientX, event.clientY, false)
+          } else if (onElementSelect && !inspected && !area) inspectAt(event.clientX, event.clientY, false)
         }}
         onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { dragStart.current = { x: point.x, y: point.y }; event.currentTarget.setPointerCapture?.(event.pointerId) } }}
-        onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; event.currentTarget.releasePointerCapture?.(event.pointerId); if (!finishArea(event.clientX, event.clientY)) inspectAt(event.clientX, event.clientY, true) } }}
+        onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; event.currentTarget.releasePointerCapture?.(event.pointerId); if (!finishArea(event.clientX, event.clientY) && onElementSelect) inspectAt(event.clientX, event.clientY, true) } }}
         onClick={(event) => { event.stopPropagation(); if (ignoreInspectClick.current) { ignoreInspectClick.current = false; return } if (inspected || area) clearInspection() }}
         onWheel={(event) => { if (inspected || area) { event.preventDefault(); event.stopPropagation() } }}
         onTouchStart={(event) => { if (inspected || area) event.preventDefault(); event.stopPropagation() }}
@@ -1385,7 +1386,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
           <small>{area ? `${area.width} × ${area.height} 像素` : `${inspected!.role} · ${inspected!.ref}`}</small>
           <label>批注<textarea value={annotation} onChange={(event) => setAnnotation(event.target.value)} placeholder="描述要对这个元素做什么" /></label>
           <div className="browser-element-inspector-actions"><button type="button" onClick={clearInspection}>取消</button><button type="button" onClick={() => { if (area && viewport) onAreaSelect?.({ pageID: activePageID!, url: pageURL || '', bounds: { x: area.x, y: area.y, width: area.width, height: area.height }, viewport, image: area.image, annotation }); else if (inspected) onElementSelect?.({ pageID: activePageID!, element: inspected, annotation }); clearInspection() }}>确认</button></div>
-        </div> : <span className="browser-element-inspector-hint">点击元素或拖动选择区域 · Esc 退出</span>}
+        </div> : <span className="browser-element-inspector-hint">{onElementSelect ? '点击元素或拖动选择区域' : '拖动选择区域'} · Esc 退出</span>}
       </div>}
       {visible('keyboard') && keyboardEnabled && liveViewEnabled && hasFrame && controller && <button
         type="button"
