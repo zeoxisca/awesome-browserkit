@@ -1,6 +1,7 @@
 import { Plus, Code2, ArrowRight, Keyboard, RefreshCw, X } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { decodeFrame, newBrowserTab, activateBrowserTab, browserStateStreamURL, browserStreamURL, closeBrowser, closeBrowserTab, fetchBrowserState, fetchCachedBrowserFrame, navigateBrowserTab, reloadBrowserTab, setBrowserTabViewport, takeBrowserControl, type BrowserControlState, type BrowserTabView, type BrowserViewState } from './client'
+import { type BrowserControlState, type BrowserTabView, type BrowserViewState } from './client'
+import { httpBrowserSource, type BrowserInputConnection, type BrowserSource } from './source'
 import { BrowserDevtoolsPanel } from './BrowserDevtoolsPanel'
 import type { BrowserControls, BrowserInputOptions, BrowserDevtoolsOptions } from './options'
 
@@ -53,6 +54,10 @@ const createBrowserViewerID = () => {
 /** 浏览器组件参数。 */
 export interface BrowserViewProps {
  endpoint: string
+ /** 数据与操作入口；省略时使用 BrowserKit HTTP/WebSocket 协议。 */
+ source?: BrowserSource
+ /** 使用宿主标签时指定当前页面。 */
+ pageID?: string
  className?: string
  style?: CSSProperties
  classNames?: Partial<Record<'toolbar' | 'tabs' | 'tab' | 'viewport' | 'devtools', string>>
@@ -75,7 +80,7 @@ export interface BrowserViewProps {
 
 export function BrowserView(props: BrowserViewProps) { return <BrowserSurface key={props.endpoint} {...props} /> }
 
-function BrowserSurface({ endpoint: sessionID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onError }: BrowserViewProps) {
+function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageID: selectedPageID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onError }: BrowserViewProps) {
  const visible = (name: keyof BrowserControls) => controls !== false && controls?.[name] !== false
  const mouseEnabled = input !== false && input?.mouse !== false
  const touchEnabled = input !== false && input?.touch !== false
@@ -130,7 +135,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const framePageRef = useRef<string | undefined>(undefined)
   const frameSequenceRef = useRef(0)
   const devtoolsResizeRef = useRef<DevtoolsResize | undefined>(undefined)
-  const socketRef = useRef<WebSocket | undefined>(undefined)
+  const socketRef = useRef<BrowserInputConnection | undefined>(undefined)
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -342,7 +347,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       clickRef.current = undefined
       clearKeyboardState()
     }
-    void setBrowserTabViewport(target.sessionID, target.pageID, { width: target.width, height: target.height }, viewerID).then(() => {
+    void source.viewport(target.sessionID, target.pageID, { width: target.width, height: target.height }, viewerID).then(() => {
       if (target.generation !== viewportGenerationRef.current) return
       viewportAppliedRef.current.set(target.pageID, { width: target.width, height: target.height })
       if (activePageRef.current !== target.pageID) return
@@ -556,7 +561,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       if (state.available) {
         if (activePageRef.current !== undefined && activePageRef.current !== state.active_page_id && sessionID) {
           // 先显示 Manager 按 Tab 保存的最后帧；新 screencast 首帧到达后再覆盖，避免黑屏。
-          void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
+          void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
         }
         activePageRef.current = state.active_page_id
         if (state.tabs) {
@@ -580,80 +585,58 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
 
       }
     }
-    const refresh = () => void fetchBrowserState(sessionID).then(applyState).catch(() => {
+    const refresh = () => void source.state(sessionID).then(applyState).catch(() => {
       // 状态查询失败可能只是 CDP 在切换 target；保留已经打开的浮窗和最后一帧。
       if (active) setSyncing(seenRef.current)
     })
     refresh()
     let retry: number | undefined
-    let socket: WebSocket | undefined
+    let unsubscribe: (() => void) | undefined
     const connect = () => {
       if (!active) return
-      socket = new WebSocket(browserStateStreamURL(sessionID))
-      socket.onmessage = (event) => {
-        if (!active || typeof event.data !== 'string') return
-        try { applyState(JSON.parse(event.data) as BrowserViewState) } catch { setSyncing(seenRef.current) }
-      }
-      socket.onclose = () => {
+      unsubscribe = source.subscribeState(sessionID, applyState, () => {
         if (!active) return
-        // 状态连接结束可能正是 Agent/Plugin runtime 被关闭。主动读取一次
-        // 权威终态；仅重连会在新连接被策略拒绝时永久保留旧 tabs 和画面。
         refresh()
         retry = window.setTimeout(connect, 500)
-      }
-      socket.onerror = () => socket?.close()
+      })
     }
     connect()
-    return () => { active = false; if (retry !== undefined) window.clearTimeout(retry); socket?.close() }
+    return () => { active = false; if (retry !== undefined) window.clearTimeout(retry); unsubscribe?.() }
   }, [devtoolsEnabled, liveViewEnabled, sessionID])
 
   useEffect(() => {
     if ((!liveViewEnabled && !devtoolsEnabled) || !sessionID || !panelHost) return
     let active = true
     let retry: number | undefined
-    let socket: WebSocket | undefined
+    let connection: BrowserInputConnection | undefined
     const connect = () => {
       if (!active) return
-      socket = new WebSocket(browserStreamURL(sessionID, viewerID, readOnly))
-      socketRef.current = socket
-      socket.binaryType = 'blob'
-      socket.onmessage = (event) => {
-        if (!active) return
-        if (typeof event.data === 'string') {
-          try {
-            const message = JSON.parse(event.data)
-            if (message.type === 'browser_input_error') {
-              setNotice(message.error.message)
-            } else {
-              applyBrowserControl(message as BrowserControlState)
-            }
-          } catch { /* 下一条控制消息会恢复。 */ }
-          return
-        }
-        if (!(event.data instanceof Blob)) return
-        void decodeFrame(event.data).then((frame) => {
-          if (!active || frame.pageID !== activePageRef.current) return false
-          if (frame.generation < (frameGenerations.current.get(frame.pageID) ?? 0)) return false
+      connection = source.connect(sessionID, viewerID, readOnly, {
+        frame: (frame) => {
+          if (!active || frame.pageID !== activePageRef.current) return
+          if (frame.generation < (frameGenerations.current.get(frame.pageID) ?? 0)) return
           frameGenerations.current.set(frame.pageID, frame.generation)
-          return drawFrame(frame.blob, frame.pageID, true)
-        }).catch(() => undefined)
-      }
-      socket.onclose = () => {
-        if (socketRef.current === socket) socketRef.current = undefined
-        if (active) {
-          loseBrowserControl()
-          setBrowserControl(undefined)
-          retry = window.setTimeout(connect, 50)
-        }
-      }
-      socket.onerror = () => socket?.close()
+          void drawFrame(frame.blob, frame.pageID, true)
+        },
+        control: applyBrowserControl,
+        error: setNotice,
+        close: () => {
+          if (socketRef.current === connection) socketRef.current = undefined
+          if (active) {
+            loseBrowserControl()
+            setBrowserControl(undefined)
+            retry = window.setTimeout(connect, 50)
+          }
+        },
+      })
+      socketRef.current = connection
     }
     connect()
     return () => {
       active = false
       if (retry !== undefined) window.clearTimeout(retry)
-      if (socketRef.current === socket) socketRef.current = undefined
-      socket?.close()
+      if (socketRef.current === connection) socketRef.current = undefined
+      connection?.close()
     }
   }, [devtoolsEnabled, liveViewEnabled, panelHost, sessionID, viewerID, readOnly])
 
@@ -1093,14 +1076,14 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     if (!browserControllerRef.current || !liveViewEnabled || !sessionID || pageID === activePageID) return
     const selection = ++tabSelectionRef.current
     try {
-      await activateBrowserTab(sessionID, pageID, viewerID)
+      await source.activate(sessionID, pageID, viewerID)
       if (selection !== tabSelectionRef.current) return
       setWaitingForFrame(true)
       // 同一浏览器窗口内切换不清空画布：目标 Tab 有本地缓存时立即替换，
       // 没有缓存时继续显示上一帧，直到服务端首帧到达。
       const local = frameCacheRef.current.get(pageID)
       if (local) void drawFrame(local, pageID)
-      const state = await fetchBrowserState(sessionID)
+      const state = await source.state(sessionID)
       if (selection !== tabSelectionRef.current || !acceptState(state)) return
       activePageRef.current = state.active_page_id
       setTabs(state.tabs ?? [])
@@ -1111,7 +1094,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
         if (!expected || expected.pageID !== state.active_page_id || expected.width === state.viewport.width && expected.height === state.viewport.height) setViewport(state.viewport)
       }
       if (state.active_page_id) {
-        void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
+        void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
       }
       setNotice(undefined)
     } catch (error) {
@@ -1119,9 +1102,14 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     }
   }
 
+  useEffect(() => {
+    if (selectedPageID && selectedPageID !== activePageID && browserControl?.controller)
+      void selectTab(selectedPageID)
+  }, [selectedPageID, activePageID, browserControl?.controller])
+
   const syncAfterNavigation = async (pageID: string) => {
     if (!sessionID) return
-    const state = await fetchBrowserState(sessionID)
+    const state = await source.state(sessionID)
     if (!acceptState(state)) return
     activePageRef.current = state.active_page_id || pageID
     setTabs(state.tabs ?? [])
@@ -1129,7 +1117,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     setPageURL(state.url)
     if (state.viewport?.width && state.viewport.height) setViewport(state.viewport)
     setWaitingForFrame(true)
-    void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id || pageID, false)).catch(() => undefined)
+    void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id || pageID, false)).catch(() => undefined)
   }
 
   const navigateAddress = async () => {
@@ -1139,7 +1127,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     try {
       addressEditingRef.current = false
       setWaitingForFrame(true)
-      await navigateBrowserTab(sessionID, pageID, address, viewerID)
+      await source.navigate(sessionID, pageID, address, viewerID)
       await syncAfterNavigation(pageID)
       setNotice(undefined)
     } catch (error) {
@@ -1152,7 +1140,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     if (!browserControllerRef.current || !liveViewEnabled || !sessionID || !pageID) return
     try {
       setWaitingForFrame(true)
-      await reloadBrowserTab(sessionID, pageID, viewerID)
+      await source.reload(sessionID, pageID, viewerID)
       await syncAfterNavigation(pageID)
       setNotice(undefined)
     } catch (error) {
@@ -1163,10 +1151,10 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const removeTab = async (pageID: string) => {
     if (!browserControllerRef.current || !liveViewEnabled || !sessionID) return
     try {
-      await closeBrowserTab(sessionID, pageID, viewerID)
+      await source.closeTab(sessionID, pageID, viewerID)
       frameCacheRef.current.delete(pageID)
       viewportAppliedRef.current.delete(pageID)
-      const state = await fetchBrowserState(sessionID)
+      const state = await source.state(sessionID)
       if (!acceptState(state)) return
       if (state.active_page_id) activePageRef.current = state.active_page_id
       setTabs(state.tabs ?? [])
@@ -1179,7 +1167,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       if (state.active_page_id) {
         const local = frameCacheRef.current.get(state.active_page_id)
         if (local) void drawFrame(local, state.active_page_id)
-        void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
+        void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
       } else {
         frameCacheRef.current.clear()
         activePageRef.current = undefined
@@ -1197,7 +1185,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     if (!sessionID || browserControllerRef.current || takingControl || controlRetryAfterMS > 0) return
     setTakingControl(true)
     try {
-      const state = await takeBrowserControl(sessionID, viewerID)
+      const state = await source.takeControl(sessionID, viewerID)
       applyBrowserControl(state)
       setNotice(undefined)
     } catch (error) {
@@ -1217,7 +1205,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     viewportAppliedRef.current.clear()
     onClose?.()
     try {
-      await closeBrowser(sessionID, viewerID)
+      await source.closeBrowser(sessionID, viewerID)
       setNotice('浏览器已关闭')
     } catch (error) {
       setNotice(error instanceof Error ? `关闭浏览器失败：${error.message}` : '关闭浏览器失败')
@@ -1238,6 +1226,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const takeoverSeconds = Math.ceil(controlRetryAfterMS / 1000)
 
   const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
+    {busy && <div className="browser-live-busy-overlay" role="status">Agent 正在操作浏览器…</div>}
     {visible('tabs') && <div data-part="tabs" className={`browser-live-tab-list ${classNames?.tabs || ''}`} role="tablist" aria-label="浏览器 Tab 列表" inert={busy || closing || undefined}>
       {tabs.length === 0 && <span className="browser-live-tab-empty">没有可用页面</span>}
       {tabs.map((tab) => <div key={tab.page_id} data-part="tab" className={`browser-live-tab-row ${classNames?.tab || ''} ${tab.page_id === activePageID ? 'browser-live-tab-row-active' : ''} ${tab.status === 'loading' ? 'browser-live-tab-row-loading' : ''}`}>
@@ -1247,7 +1236,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
         </button>
         {liveViewEnabled && visible('closeTab') && <button type="button" className="browser-live-tab-close" disabled={!controller} aria-label={`关闭 ${tab.title || '浏览器 Tab'}`} onClick={() => void removeTab(tab.page_id)}><X size={12} /></button>}
       </div>)}
-      {!readOnly && liveViewEnabled && visible('newTab') && <button type="button" className="browser-new-tab" aria-label="新建浏览器 Tab" disabled={!controller} onClick={() => void newBrowserTab(sessionID, viewerID).catch((error: Error) => setNotice(error.message))}><Plus size={14} /></button>}
+      {!readOnly && liveViewEnabled && visible('newTab') && <button type="button" className="browser-new-tab" aria-label="新建浏览器 Tab" disabled={!controller} onClick={() => void source.newTab(sessionID, viewerID).catch((error: Error) => setNotice(error.message))}><Plus size={14} /></button>}
     </div>}
     {showToolbar && <header data-part="toolbar" className={`browser-live-window-header ${classNames?.toolbar || ''}`}>
       <div className="browser-live-address-row" inert={busy || closing || undefined} onPointerDown={(event) => { event.stopPropagation() }}>
@@ -1334,7 +1323,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       </div>
       {visible('devtoolsFloating') && devtoolsEnabled && !devtoolsPanelOpen && <button type="button" className="browser-devtools-panel-trigger" aria-label="打开开发诊断面板" onClick={openDevtoolsPanel}><span aria-hidden="true" />开发诊断</button>}
       {devtoolsEnabled && devtoolsPanelOpen && devtoolsOptions?.resizable !== false && <div className="browser-devtools-resizer" role="separator" aria-label="调整开发诊断高度" aria-orientation="horizontal" onPointerDown={startDevtoolsResize} onPointerMove={moveDevtoolsResize} onPointerUp={endDevtoolsResize} onPointerCancel={endDevtoolsResize} />}
-      {devtoolsEnabled && sessionID && <BrowserDevtoolsPanel className={classNames?.devtools} sessionID={sessionID} pageID={activePageID} viewerID={viewerID} controlEnabled={controller} hidden={!devtoolsPanelOpen} panels={devtoolsOptions?.panels} captureControl={devtoolsOptions?.captureControl} onClose={devtoolsOptions?.closeButton === false ? undefined : closeDevtoolsPanel} />}
+      {devtoolsEnabled && sessionID && <BrowserDevtoolsPanel source={source.diagnostics} className={classNames?.devtools} sessionID={sessionID} pageID={activePageID} viewerID={viewerID} controlEnabled={controller} hidden={!devtoolsPanelOpen} panels={devtoolsOptions?.panels} captureControl={devtoolsOptions?.captureControl} onClose={devtoolsOptions?.closeButton === false ? undefined : closeDevtoolsPanel} />}
     </div>}
     {notice && <div role="alert" className="browser-live-window-notice">{notice}</div>}
 

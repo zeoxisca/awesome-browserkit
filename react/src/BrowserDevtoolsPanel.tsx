@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, CircleAlert, File, Folder, FolderOpen, Info, Radio, TriangleAlert, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { browserDevtoolsStreamURL, fetchBrowserAssets, fetchBrowserDevtoolsState, startBrowserDevtools, stopBrowserDevtools, type BrowserAsset, type BrowserDevtoolsEntry, type BrowserDevtoolsState } from './client'
+import { type BrowserAsset, type BrowserDevtoolsEntry, type BrowserDevtoolsState } from './client'
+import { httpBrowserSource, type BrowserDiagnosticsSource } from './source'
 
 import type { BrowserDevtoolsTab } from './options'
 type DiagnosticTab = BrowserDevtoolsTab
@@ -27,7 +28,7 @@ interface ResourceTreeNode {
 
 const emptyView: DiagnosticView = { status: 'idle', generation: 0, revision: 0, entries: [], pendingRequests: 0, droppedBefore: 0 }
 
-export function BrowserDevtoolsPanel({ className = '', sessionID, pageID, viewerID, controlEnabled = true, hidden = false, panels = allPanels, captureControl = true, onClose }: { className?: string; sessionID: string; pageID?: string; viewerID?: string; controlEnabled?: boolean; hidden?: boolean; panels?: readonly DiagnosticTab[]; captureControl?: boolean; onClose?: () => void }) {
+export function BrowserDevtoolsPanel({ source = httpBrowserSource.diagnostics, className = '', sessionID, pageID, viewerID, controlEnabled = true, hidden = false, panels = allPanels, captureControl = true, onClose }: { source?: BrowserDiagnosticsSource; className?: string; sessionID: string; pageID?: string; viewerID?: string; controlEnabled?: boolean; hidden?: boolean; panels?: readonly DiagnosticTab[]; captureControl?: boolean; onClose?: () => void }) {
   const [view, setView] = useState<DiagnosticView>(emptyView)
   const [selectedTab, setTab] = useState<DiagnosticTab>(panels[0] ?? 'console')
   const tab = panels.includes(selectedTab) ? selectedTab : panels[0]
@@ -53,8 +54,7 @@ export function BrowserDevtoolsPanel({ className = '', sessionID, pageID, viewer
     viewRef.current = emptyView
     if (!pageID) return
     let active = true
-    let socket: WebSocket | undefined
-    let retry: number | undefined
+    let unsubscribe: (() => void) | undefined
     const applyState = (state: BrowserDevtoolsState) => {
       if (!active || !Array.isArray(state.entries)) return
       viewRef.current = mergeDevtoolsState(viewRef.current, state)
@@ -62,35 +62,17 @@ export function BrowserDevtoolsPanel({ className = '', sessionID, pageID, viewer
     }
     const refresh = () => {
       const after = viewRef.current.entries.at(-1)?.sequence ?? 0
-      void fetchBrowserDevtoolsState(sessionID, pageID, after, 100).then(applyState).catch(() => undefined)
-    }
-    const connect = () => {
-      if (!active) return
-      socket = new WebSocket(browserDevtoolsStreamURL(sessionID, pageID))
-      socket.onmessage = (event) => {
-        if (!active || typeof event.data !== 'string') return
-        try {
-          const state = JSON.parse(event.data) as BrowserDevtoolsState
-          applyState(state)
-        } catch {
-          // 丢弃单个损坏的临时视图；下一条增量仍可继续恢复。
-        }
-      }
-      socket.onclose = () => {
-        if (active) retry = window.setTimeout(connect, 500)
-      }
-      socket.onerror = () => socket?.close()
+      void source.read(sessionID, pageID, after, 100).then(applyState).catch(() => undefined)
     }
     refresh()
     const poll = window.setInterval(refresh, 1500)
-    connect()
+    unsubscribe = source.subscribe(sessionID, pageID, applyState)
     return () => {
       active = false
       window.clearInterval(poll)
-      if (retry !== undefined) window.clearTimeout(retry)
-      socket?.close()
+      unsubscribe?.()
     }
-  }, [pageID, sessionID])
+  }, [pageID, sessionID, source])
 
   useEffect(() => setSelected(undefined), [view.generation, tab])
 
@@ -101,15 +83,15 @@ export function BrowserDevtoolsPanel({ className = '', sessionID, pageID, viewer
     let first = true
     const refresh = () => {
       if (first) setAssetsLoading(true)
-      void fetchBrowserAssets(sessionID, pageID, '', 500, controller.signal)
-        .then((state) => { if (active) setAssets(state.assets) })
+      void source.assets(sessionID, pageID, controller.signal)
+        .then((state) => { if (active) setAssets(state) })
         .catch(() => { if (active) setAssets([]) })
         .finally(() => { if (active) { first = false; setAssetsLoading(false) } })
     }
     refresh()
     const timer = window.setInterval(refresh, 1500)
     return () => { active = false; window.clearInterval(timer); controller.abort() }
-  }, [pageID, sessionID, tab])
+  }, [pageID, sessionID, tab, source])
 
   const consoleEntries = useMemo(() => view.entries.filter((entry) => entry.kind === 'console' || entry.kind === 'exception'), [view.entries])
   const networkEntries = useMemo(() => view.entries.filter((entry) => entry.kind === 'network'), [view.entries])
@@ -126,8 +108,8 @@ export function BrowserDevtoolsPanel({ className = '', sessionID, pageID, viewer
     setControlError(undefined)
     try {
       const state = view.status === 'collecting'
-        ? await stopBrowserDevtools(sessionID, pageID, viewerID)
-        : await startBrowserDevtools(sessionID, pageID, viewerID)
+        ? await source.stop(sessionID, pageID, viewerID)
+        : await source.start(sessionID, pageID, viewerID)
       viewRef.current = mergeDevtoolsState(viewRef.current, state)
       setView(viewRef.current)
     } catch (error) {

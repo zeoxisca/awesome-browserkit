@@ -1,3 +1,5 @@
 export { BrowserView, type BrowserViewProps } from './BrowserView'
+export { BrowserDevtoolsPanel } from './BrowserDevtoolsPanel'
+export { httpBrowserSource, type BrowserSource, type BrowserDiagnosticsSource, type BrowserInputConnection } from './source'
 export type { BrowserViewState as BrowserState, BrowserTabView, BrowserControlState } from './client'
 export type { BrowserControls, BrowserInputOptions, BrowserDevtoolsOptions, BrowserDevtoolsTab } from './options'

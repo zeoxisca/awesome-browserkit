@@ -231,3 +231,5 @@
 
 .browserkit .browser-devtools-header { height:35px; margin:0; padding:0 9px; }
 .browserkit .browser-devtools > footer { margin:0; padding:0 9px; }
+.browserkit .browser-live-busy-overlay { position: absolute; z-index: 20; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / 32%); color: #fff; font-size: var(--type-caption-size); pointer-events: auto; }
+.browserkit .browser-live-busy-overlay::first-line { padding: 8px 12px; }

@@ -21,7 +21,8 @@
   "scripts": {
     "build": "vite build && tsc -p tsconfig.json && cp src/style.css dist/style.css",
     "test": "vitest run",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "build:standalone": "vite build --config vite.standalone.config.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0",
