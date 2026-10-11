@@ -1,6 +1,6 @@
 # @browserkit/react
 
-`BrowserView` 连接 BrowserKit HTTP 服务，提供页面画面、Tab 管理、输入和开发诊断。
+`BrowserView` 可通过默认 HTTP/WebSocket 数据源连接 BrowserKit 服务，也可接收宿主实现的 `BrowserSource`，提供页面画面、Tab 管理、输入和开发诊断。
 需要 React 19。
 
 ## 安装
@@ -47,7 +47,9 @@ export function Workspace() {
 
 | 参数 | 说明 |
 | --- | --- |
-| `endpoint` | 必填，指向 browserhttp 挂载地址；支持相对路径或完整 URL |
+| `endpoint` | 必填。默认数据源下指向 browserhttp 挂载地址，支持相对路径或完整 URL；自定义数据源下作为会话标识传入各方法 |
+| `source` | 可选 `BrowserSource`；默认使用导出的 `httpBrowserSource` |
+| `pageID` | 可选；宿主自行展示 Tab 时指定当前页面 ID |
 | `className`、`style` | 根节点外观及容器尺寸 |
 | `classNames` | `toolbar`、`tabs`、`tab`、`viewport`、`devtools` 的自定义 class |
 | `busy` | 默认 false；暂停页面交互，保留控制方的关闭入口 |
@@ -61,11 +63,33 @@ export function Workspace() {
 | `viewerID` | 默认每实例生成；同一实例重连保持身份 |
 | `onStateChange` | 浏览器完整状态更新回调 |
 | `onError` | 请求或操作错误回调 |
+| `onElementSelect` | 控制方点击页面元素并确认后，返回页面 ID、含版本号的元素 ref 与批注；启用元素选择按钮 |
+| `onAreaSelect` | 控制方拖出区域并确认后，返回页面 ID、URL、视口坐标、视口尺寸、PNG `Blob` 与批注；启用区域选择按钮 |
+
+两种回调可同时传入。选择过程中可继续滚动页面；选定后会暂停远端输入，取消或确认即可继续。按 Esc 退出选择模式。元素 ref 与页面版本绑定，页面变化后应重新选择。区域图片来自当前实时画面，宿主应在回调中保存或上传 `Blob`。若需由 Go 端重新截图，可将 `bounds` 和 `viewport` 转成 `ScreenshotRequest.Region`；该字段不能与 `FullPage` 同时使用。
 
 同一应用页面可以嵌入多个组件实例。
 `endpoint` 变化时，组件清理上一目标的连接、输入和画面。
 只有控制方调整远端 viewport，观察者按容器缩放已有图片。
 请求使用 Cookie 凭据；跨源部署需要服务端明确配置允许的 Origin。
+
+## 自定义接入
+
+宿主已有浏览器后端或自己的传输层时，实现从包根导出的 `BrowserSource` 并传入 `source`。组件会将 `endpoint` 原样传给数据源方法，因此自定义场景可使用会话 ID。接口包含状态读取和订阅、缓存帧、实时帧与输入连接、Tab 操作、操作权、视口、关闭浏览器及 `diagnostics`；元素选择还需实现可选的 `inspectPoint` 方法，接收 `viewerID` 以验证操作权。完整方法签名以导出的 TypeScript 类型为准。`BrowserInputConnection` 需提供 `readyState`、`bufferedAmount`、`send` 和 `close`。
+
+```tsx
+import { BrowserView, type BrowserSource } from '@browserkit/react'
+import '@browserkit/react/style.css'
+
+declare const source: BrowserSource // 由宿主实现并复用同一对象
+
+<BrowserView endpoint="session-123" source={source} pageID="page-456"
+  controls={{ tabs: false }} style={{ height: 560 }} />
+```
+
+`pageID` 适用于宿主自行管理 Tab 的场景。单独使用诊断面板时，从包根导入 `BrowserDevtoolsPanel`，将同一个数据源的 `diagnostics` 传给其 `source` 属性。保持 `source` 对象引用稳定，并在 `subscribeState` 返回的取消函数和 `connect` 返回连接的 `close()` 中释放资源。
+
+需要在已有页面中挂载独立 React 根时，运行 `npm run build:standalone --prefix react`，加载生成的 `react/standalone/browser.js` 和 `react/standalone/react.css`，然后调用模块导出的 `mountBrowserView(element, props)`。返回值提供 `update(nextProps)` 和 `unmount()`；独立脚本已包含 React。
 
 ## 布局与样式
 

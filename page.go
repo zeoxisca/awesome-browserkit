@@ -539,6 +539,56 @@ func (page *rodPage) Snapshot(ctx context.Context, options SnapshotOptions) (Sna
 	return Snapshot{Info: PageInfo{URL: raw.URL, Title: raw.Title}, Revision: revision, Text: raw.Text, Elements: raw.Elements, Truncated: truncated || len(raw.Elements) == options.MaxElements, ActiveRefs: raw.Refs}, nil
 }
 
+// InspectPoint 为任意可见元素建立与 Snapshot 相同命名空间的 ref。
+func (page *rodPage) InspectPoint(ctx context.Context, x, y float64) (InspectedElement, error) {
+	operationCtx, cancel, err := page.ctx(ctx)
+	if err != nil {
+		return InspectedElement{}, err
+	}
+	defer cancel()
+	if err := page.syncState(operationCtx); err != nil {
+		return InspectedElement{}, err
+	}
+	page.stateMu.Lock()
+	revision := page.revision
+	page.stateMu.Unlock()
+	result, err := page.page.Context(operationCtx).Eval(`(point) => {
+		const hit = document.elementFromPoint(point.x, point.y);
+		if (!hit || hit === document.documentElement) return null;
+		const el = hit.closest('button,a,input,textarea,select,summary,[role="button"],[role="link"],[role="textbox"],[role="tab"]') || hit;
+		const rect = el.getBoundingClientRect();
+		const state = window.__browserkit_page_state_v1__;
+		const previous = el.getAttribute('data-browserkit-ref') || '';
+		const ref = previous.startsWith(state.refPrefix + '_') ? previous : state.refPrefix + '_' + (++state.nextRef);
+		el.setAttribute('data-browserkit-ref', ref);
+		state.refs.add(ref);
+		const clean = value => (value || '').replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+		const role = el.getAttribute('role') || el.tagName.toLowerCase();
+		const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.textContent || '').join(' ');
+		const name = clean(el.getAttribute('aria-label') || labelledBy || el.getAttribute('placeholder') || el.getAttribute('title') || el.innerText || el.textContent || '');
+		return {ref, role, name, url: location.href, bounds: {x: rect.left, y: rect.top, width: rect.width, height: rect.height}};
+	}`, map[string]float64{"x": x, "y": y})
+	if err != nil {
+		return InspectedElement{}, err
+	}
+	var element InspectedElement
+	if err := result.Value.Unmarshal(&element); err != nil {
+		return InspectedElement{}, err
+	}
+	if element.Ref == "" {
+		return InspectedElement{}, errors.New("该位置没有可选择的元素")
+	}
+	page.stateMu.Lock()
+	if revision != page.revision {
+		page.stateMu.Unlock()
+		return InspectedElement{}, errors.New("页面已变化，请重新选择元素")
+	}
+	page.refs[element.Ref] = struct{}{}
+	page.stateMu.Unlock()
+	element.Revision = revision
+	return element, nil
+}
+
 // elementLocked 只在持有 page.interactionMu 时调用。返回的 Element 仍会使用传入的
 // operationCtx，因此不能在这里创建并取消一个临时 context。
 func (page *rodPage) elementLocked(ctx context.Context, ref ElementRef) (*rod.Element, error) {

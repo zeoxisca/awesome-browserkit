@@ -1,8 +1,16 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { startBrowserDevtools, stopBrowserDevtools, takeBrowserControl, setBrowserTabViewport, browserStreamURL, decodeFrame } from './client'
+import { httpBrowserSource } from './source'
 const jsonResponse = (value: unknown) => new Response(JSON.stringify(value), {headers:{'Content-Type':'application/json'}})
 afterEach(()=>vi.unstubAllGlobals())
 describe('browser client',()=>{
+  it('sends viewer identity when inspecting an element', async () => {
+    const request = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ref: 'r_1', revision: 1, role: 'button', url: 'https://example.com', bounds: { x: 1, y: 2, width: 3, height: 4 } }))
+    vi.stubGlobal('fetch', request)
+    await httpBrowserSource.inspectPoint!('/browser', 'page/a', 10, 20, 'viewer-a')
+    expect(String(request.mock.calls[0][0])).toBe('/browser/tabs/page%2Fa/inspect')
+    expect(new Headers(request.mock.calls[0][1]?.headers).get('X-Browserkit-Viewer')).toBe('viewer-a')
+  })
   it('sends the browser viewer identity when changing DevTools collection', async () => {
     const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe('/api/sessions/session%2Fmain/browser/tabs/page%2Fchild/devtools')

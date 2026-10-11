@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { activateBrowserTab, browserDevtoolsStreamURL, browserStateStreamURL, browserStreamURL, closeBrowser, closeBrowserTab, fetchBrowserAssets, fetchBrowserDevtoolsState, fetchBrowserState, fetchCachedBrowserFrame, setBrowserTabViewport, takeBrowserControl, type BrowserTabView, type BrowserViewState } from './client'
 import { BrowserView, type BrowserViewProps } from './BrowserView'
+import { httpBrowserSource } from './source'
 function BrowserLiveWindow({sessionID, devtoolsEnabled, liveViewEnabled, agentOperating}: {sessionID?:string;devtoolsEnabled?:boolean;liveViewEnabled?:boolean;agentOperating?:boolean;[key:string]:unknown}) { return <BrowserView endpoint={sessionID || '/browser'} devtools={devtoolsEnabled} liveView={liveViewEnabled} busy={agentOperating} /> }
 
 vi.mock('./client', () => ({
@@ -178,6 +179,75 @@ describe('BrowserLiveWindow', () => {
     vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) })
     return frame
   }
+
+  it('keeps scrolling in select mode and freezes remote input only after selection', async () => {
+    mockedFetchBrowserState.mockResolvedValue(singleTabState())
+    const source = { ...httpBrowserSource, inspectPoint: vi.fn(async () => ({ ref: 'r_1', revision: 1, role: 'button', name: '提交', url: 'https://example.com', bounds: { x: 90, y: 90, width: 80, height: 30 } })) }
+    render(<BrowserView endpoint="/browser" source={source} onElementSelect={vi.fn()} />)
+    const frame = await configuredFrame()
+    fireEvent.click(screen.getByRole('button', { name: '选择页面元素' }))
+    const overlay = document.querySelector('.browser-element-inspector')!
+    fireEvent.wheel(overlay, { clientX: 100, clientY: 100, deltaY: 20 })
+    expect(sentInputs()).toEqual([expect.objectContaining({ kind: 'mouse', action: 'wheel' })])
+    fireEvent(overlay, pointerEvent('pointerdown'))
+    fireEvent(overlay, pointerEvent('pointerup', 0))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('dialog', { name: '选中页面内容' })).toBeInTheDocument()
+    fireEvent.wheel(overlay, { clientX: 100, clientY: 100, deltaY: 20 })
+    fireEvent.keyDown(frame, { key: 'A', code: 'KeyA' })
+    expect(sentInputs()).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: '选择页面元素' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.wheel(overlay, { clientX: 100, clientY: 100, deltaY: 20 })
+    expect(sentInputs()).toHaveLength(2)
+  })
+
+  it('captures a dragged page region with viewport coordinates and a PNG', async () => {
+    mockedFetchBrowserState.mockResolvedValue(singleTabState())
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => callback(new Blob(['png'], { type: 'image/png' })))
+    const selected = vi.fn()
+    render(<BrowserView endpoint="/browser" onElementSelect={vi.fn()} onAreaSelect={selected} />)
+    await configuredFrame()
+    fireEvent.click(screen.getByRole('button', { name: '选择页面元素' }))
+    const overlay = document.querySelector('.browser-element-inspector')!
+    const drag = (type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: y }, pointerId: { value: 7 }, pointerType: { value: 'mouse' }, button: { value: 0 }, buttons: { value: 1 } })
+      return event
+    }
+    fireEvent(overlay, drag('pointerdown', 100, 120))
+    fireEvent(overlay, drag('pointermove', 220, 200))
+    fireEvent(overlay, drag('pointerup', 220, 200))
+    expect(document.querySelector('.browser-element-inspector-area')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
+    expect(selected).toHaveBeenCalledWith(expect.objectContaining({
+      pageID: 'page-a', bounds: { x: 100, y: 120, width: 120, height: 80 },
+      viewport: defaultViewport, image: expect.any(Blob),
+    }))
+    expect(screen.getByRole('button', { name: '选择页面元素' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('discards a pending region image after selection is cancelled', async () => {
+    mockedFetchBrowserState.mockResolvedValue(singleTabState())
+    let finishImage: BlobCallback | undefined
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => { finishImage = callback })
+    render(<BrowserView endpoint="/browser" onAreaSelect={vi.fn()} />)
+    await configuredFrame()
+    fireEvent.click(screen.getByRole('button', { name: '选择页面元素' }))
+    const overlay = document.querySelector('.browser-element-inspector')!
+    const drag = (type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: y }, pointerId: { value: 7 }, pointerType: { value: 'mouse' }, button: { value: 0 }, buttons: { value: 1 } })
+      return event
+    }
+    fireEvent(overlay, drag('pointerdown', 100, 120))
+    fireEvent(overlay, drag('pointerup', 220, 200))
+    expect(finishImage).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '选择页面元素' }))
+    await act(async () => { finishImage?.(new Blob(['png'], { type: 'image/png' })) })
+    expect(screen.queryByRole('dialog', { name: '选中页面内容' })).toBeNull()
+    expect(document.querySelector('.browser-element-inspector')).toBeNull()
+  })
 
   it('hides all controls while retaining the live canvas and caller styles', async () => {
     mockedFetchBrowserState.mockResolvedValue(singleTabState())
@@ -425,6 +495,31 @@ describe('BrowserLiveWindow', () => {
     const window = screen.getByRole('region', { name: '浏览器页面直播' })
     const children = Array.from(window.children)
     expect(children.findIndex((child) => child.getAttribute('role') === 'tablist')).toBeLessThan(children.findIndex((child) => child.tagName === 'HEADER'))
+  })
+
+  it('keeps a newly active Tab when the host selection has not changed', async () => {
+    const tabs = (active: string) => [
+      { page_id: 'page-a', title: 'A', status: 'ready' as const, active: active === 'page-a' },
+      { page_id: 'page-b', title: 'B', status: 'ready' as const, active: active === 'page-b' },
+    ]
+    mockedFetchBrowserState.mockResolvedValue({
+      available: true, closed: false, active_page_id: 'page-a', tabs_revision: 1, tabs: tabs('page-a'),
+    })
+    const { rerender } = render(<BrowserView endpoint="session-a" pageID="page-a" />)
+    await act(async () => {})
+    await receiveFrame()
+
+    await receiveState({ available: true, closed: false, active_page_id: 'page-b', tabs_revision: 2, tabs: tabs('page-b') })
+    expect(mockedActivateBrowserTab).not.toHaveBeenCalled()
+
+    rerender(<BrowserView endpoint="session-a" pageID="page-b" />)
+    await act(async () => {})
+    expect(mockedActivateBrowserTab).not.toHaveBeenCalled()
+
+    rerender(<BrowserView endpoint="session-a" pageID="page-a" />)
+    await act(async () => {})
+    expect(mockedActivateBrowserTab).toHaveBeenCalledTimes(1)
+    expect(mockedActivateBrowserTab).toHaveBeenCalledWith('session-a', 'page-a', expect.any(String))
   })
 
   it('debounces the measured side-panel page area into the active remote viewport', async () => {

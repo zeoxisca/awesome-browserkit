@@ -5,6 +5,7 @@ package browserkit
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -201,6 +202,36 @@ func TestRealBrowserManagerWorkflow(t *testing.T) {
 	shot, err := manager.Screenshot(ctx, ScreenshotRequest{SessionID: opened.SessionID, PageID: opened.PageID})
 	if err != nil || shot.Bytes == 0 || shot.Format != "png" {
 		t.Fatalf("browserScreenshot=%+v, %v", shot, err)
+	}
+	center, err := manager.Evaluate(ctx, EvaluateRequest{SessionID: opened.SessionID, PageID: opened.PageID,
+		Code: `(() => { const r = document.querySelector('#apply').getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + r.height / 2} })()`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var point struct{ X, Y float64 }
+	if err := json.Unmarshal(center.Value, &point); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := manager.InspectPoint(ctx, InspectPointRequest{SessionID: opened.SessionID, PageID: opened.PageID, X: point.X, Y: point.Y})
+	if err != nil || selected.Ref == "" || selected.Revision == 0 || selected.Role != "button" || selected.Name != "Apply" {
+		t.Fatalf("browserInspectPoint=%+v, %v", selected, err)
+	}
+	if _, err := manager.Click(ctx, ClickRequest{SessionID: opened.SessionID, PageID: opened.PageID, Ref: selected.Ref, Revision: selected.Revision}); err != nil {
+		t.Fatalf("click inspected ref: %v", err)
+	}
+	region, err := manager.Screenshot(ctx, ScreenshotRequest{SessionID: opened.SessionID, PageID: opened.PageID,
+		Region: &ScreenshotRegion{X: 10, Y: 10, Width: 40, Height: 30, ViewportWidth: 960, ViewportHeight: 640},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	croppedImage, _, err := image.Decode(bytes.NewReader(region.Data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if croppedImage.Bounds().Dx() != 40 || croppedImage.Bounds().Dy() != 30 {
+		t.Fatalf("region screenshot bounds=%v", croppedImage.Bounds())
 	}
 
 	if _, err := manager.Click(ctx, ClickRequest{

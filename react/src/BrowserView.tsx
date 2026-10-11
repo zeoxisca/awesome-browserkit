@@ -1,6 +1,7 @@
-import { Plus, Code2, ArrowRight, Keyboard, RefreshCw, X } from 'lucide-react'
+import { Plus, Code2, ArrowRight, Keyboard, RefreshCw, X, MousePointer2 } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { decodeFrame, newBrowserTab, activateBrowserTab, browserStateStreamURL, browserStreamURL, closeBrowser, closeBrowserTab, fetchBrowserState, fetchCachedBrowserFrame, navigateBrowserTab, reloadBrowserTab, setBrowserTabViewport, takeBrowserControl, type BrowserControlState, type BrowserTabView, type BrowserViewState } from './client'
+import { type BrowserControlState, type BrowserTabView, type BrowserViewState } from './client'
+import { httpBrowserSource, type BrowserInputConnection, type BrowserSource, type BrowserInspectedElement } from './source'
 import { BrowserDevtoolsPanel } from './BrowserDevtoolsPanel'
 import type { BrowserControls, BrowserInputOptions, BrowserDevtoolsOptions } from './options'
 
@@ -53,6 +54,10 @@ const createBrowserViewerID = () => {
 /** 浏览器组件参数。 */
 export interface BrowserViewProps {
  endpoint: string
+ /** 数据与操作入口；省略时使用 BrowserKit HTTP/WebSocket 协议。 */
+ source?: BrowserSource
+ /** 使用宿主标签时指定当前页面。 */
+ pageID?: string
  className?: string
  style?: CSSProperties
  classNames?: Partial<Record<'toolbar' | 'tabs' | 'tab' | 'viewport' | 'devtools', string>>
@@ -70,12 +75,15 @@ export interface BrowserViewProps {
  viewport?: 'container' | { width: number; height: number }
  viewerID?: string
  onStateChange?: (state: BrowserViewState) => void
+ /** 选择完成后由宿主将元素和批注放入聊天草稿。 */
+ onElementSelect?: (value: { pageID: string; element: BrowserInspectedElement; annotation: string }) => void
+ onAreaSelect?: (value: { pageID: string; url: string; bounds: { x: number; y: number; width: number; height: number }; viewport: BrowserViewport; image: Blob; annotation: string }) => void
  onError?: (error: Error) => void
 }
 
 export function BrowserView(props: BrowserViewProps) { return <BrowserSurface key={props.endpoint} {...props} /> }
 
-function BrowserSurface({ endpoint: sessionID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onError }: BrowserViewProps) {
+function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageID: selectedPageID, className = '', style, classNames, readOnly = false, busy = false, onClose, controls, input, devtools = false, liveView: liveViewEnabled = true, viewport: configuredViewport = 'container', viewerID: suppliedViewerID, onStateChange, onElementSelect, onAreaSelect, onError }: BrowserViewProps) {
  const visible = (name: keyof BrowserControls) => controls !== false && controls?.[name] !== false
  const mouseEnabled = input !== false && input?.mouse !== false
  const touchEnabled = input !== false && input?.touch !== false
@@ -101,6 +109,19 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const [notice, setNotice] = useState<string>()
+  const [inspecting, setInspecting] = useState(false)
+  const [inspected, setInspected] = useState<BrowserInspectedElement>()
+  const [hovered, setHovered] = useState<BrowserInspectedElement>()
+  const [area, setArea] = useState<{ x: number; y: number; width: number; height: number; image: Blob }>()
+  const [dragArea, setDragArea] = useState<{ x: number; y: number; width: number; height: number }>()
+  const dragStart = useRef<{ x: number; y: number } | undefined>(undefined)
+  const ignoreInspectClick = useRef(false)
+  const [annotation, setAnnotation] = useState('')
+  const inspectSequence = useRef(0)
+  const inspectingRef = useRef(false)
+  inspectingRef.current = inspecting
+  const selectionLockedRef = useRef(false)
+  selectionLockedRef.current = Boolean(inspected || area)
   const errorCallback = useRef(onError); errorCallback.current = onError
   useEffect(() => { if (notice) errorCallback.current?.(new Error(notice)) }, [notice])
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null)
@@ -130,7 +151,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const framePageRef = useRef<string | undefined>(undefined)
   const frameSequenceRef = useRef(0)
   const devtoolsResizeRef = useRef<DevtoolsResize | undefined>(undefined)
-  const socketRef = useRef<WebSocket | undefined>(undefined)
+  const socketRef = useRef<BrowserInputConnection | undefined>(undefined)
   const frameRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -342,7 +363,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       clickRef.current = undefined
       clearKeyboardState()
     }
-    void setBrowserTabViewport(target.sessionID, target.pageID, { width: target.width, height: target.height }, viewerID).then(() => {
+    void source.viewport(target.sessionID, target.pageID, { width: target.width, height: target.height }, viewerID).then(() => {
       if (target.generation !== viewportGenerationRef.current) return
       viewportAppliedRef.current.set(target.pageID, { width: target.width, height: target.height })
       if (activePageRef.current !== target.pageID) return
@@ -556,7 +577,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       if (state.available) {
         if (activePageRef.current !== undefined && activePageRef.current !== state.active_page_id && sessionID) {
           // 先显示 Manager 按 Tab 保存的最后帧；新 screencast 首帧到达后再覆盖，避免黑屏。
-          void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
+          void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
         }
         activePageRef.current = state.active_page_id
         if (state.tabs) {
@@ -580,80 +601,58 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
 
       }
     }
-    const refresh = () => void fetchBrowserState(sessionID).then(applyState).catch(() => {
+    const refresh = () => void source.state(sessionID).then(applyState).catch(() => {
       // 状态查询失败可能只是 CDP 在切换 target；保留已经打开的浮窗和最后一帧。
       if (active) setSyncing(seenRef.current)
     })
     refresh()
     let retry: number | undefined
-    let socket: WebSocket | undefined
+    let unsubscribe: (() => void) | undefined
     const connect = () => {
       if (!active) return
-      socket = new WebSocket(browserStateStreamURL(sessionID))
-      socket.onmessage = (event) => {
-        if (!active || typeof event.data !== 'string') return
-        try { applyState(JSON.parse(event.data) as BrowserViewState) } catch { setSyncing(seenRef.current) }
-      }
-      socket.onclose = () => {
+      unsubscribe = source.subscribeState(sessionID, applyState, () => {
         if (!active) return
-        // 状态连接结束可能正是 Agent/Plugin runtime 被关闭。主动读取一次
-        // 权威终态；仅重连会在新连接被策略拒绝时永久保留旧 tabs 和画面。
         refresh()
         retry = window.setTimeout(connect, 500)
-      }
-      socket.onerror = () => socket?.close()
+      })
     }
     connect()
-    return () => { active = false; if (retry !== undefined) window.clearTimeout(retry); socket?.close() }
+    return () => { active = false; if (retry !== undefined) window.clearTimeout(retry); unsubscribe?.() }
   }, [devtoolsEnabled, liveViewEnabled, sessionID])
 
   useEffect(() => {
     if ((!liveViewEnabled && !devtoolsEnabled) || !sessionID || !panelHost) return
     let active = true
     let retry: number | undefined
-    let socket: WebSocket | undefined
+    let connection: BrowserInputConnection | undefined
     const connect = () => {
       if (!active) return
-      socket = new WebSocket(browserStreamURL(sessionID, viewerID, readOnly))
-      socketRef.current = socket
-      socket.binaryType = 'blob'
-      socket.onmessage = (event) => {
-        if (!active) return
-        if (typeof event.data === 'string') {
-          try {
-            const message = JSON.parse(event.data)
-            if (message.type === 'browser_input_error') {
-              setNotice(message.error.message)
-            } else {
-              applyBrowserControl(message as BrowserControlState)
-            }
-          } catch { /* 下一条控制消息会恢复。 */ }
-          return
-        }
-        if (!(event.data instanceof Blob)) return
-        void decodeFrame(event.data).then((frame) => {
-          if (!active || frame.pageID !== activePageRef.current) return false
-          if (frame.generation < (frameGenerations.current.get(frame.pageID) ?? 0)) return false
+      connection = source.connect(sessionID, viewerID, readOnly, {
+        frame: (frame) => {
+          if (!active || frame.pageID !== activePageRef.current) return
+          if (frame.generation < (frameGenerations.current.get(frame.pageID) ?? 0)) return
           frameGenerations.current.set(frame.pageID, frame.generation)
-          return drawFrame(frame.blob, frame.pageID, true)
-        }).catch(() => undefined)
-      }
-      socket.onclose = () => {
-        if (socketRef.current === socket) socketRef.current = undefined
-        if (active) {
-          loseBrowserControl()
-          setBrowserControl(undefined)
-          retry = window.setTimeout(connect, 50)
-        }
-      }
-      socket.onerror = () => socket?.close()
+          void drawFrame(frame.blob, frame.pageID, true)
+        },
+        control: applyBrowserControl,
+        error: setNotice,
+        close: () => {
+          if (socketRef.current === connection) socketRef.current = undefined
+          if (active) {
+            loseBrowserControl()
+            setBrowserControl(undefined)
+            retry = window.setTimeout(connect, 50)
+          }
+        },
+      })
+      socketRef.current = connection
     }
     connect()
     return () => {
       active = false
       if (retry !== undefined) window.clearTimeout(retry)
-      if (socketRef.current === socket) socketRef.current = undefined
-      socket?.close()
+      if (socketRef.current === connection) socketRef.current = undefined
+      connection?.close()
     }
   }, [devtoolsEnabled, liveViewEnabled, panelHost, sessionID, viewerID, readOnly])
 
@@ -701,7 +700,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const sendInput = (input: BrowserInput) => {
     // 图流仅用于显示；输入目标只取独立 state 通道确认过的
     // active page，并由 Manager 在入队和投递前再次校验。
-    if (!liveViewEnabled || !browserControllerRef.current) return
+    if (!liveViewEnabled || !browserControllerRef.current || inspectingRef.current && selectionLockedRef.current) return
     if (input.kind === 'mouse' && (input.action === 'wheel' ? !wheelEnabled : !mouseEnabled)) return
     if (input.kind === 'touch' && !touchEnabled) return
     if (['key', 'shortcut', 'composition', 'text'].includes(input.kind) && !keyboardEnabled) return
@@ -821,6 +820,64 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     return { x, y, scaleX: viewport.width / width, scaleY: viewport.height / height }
   }
 
+  const stopInspecting = () => {
+    inspectSequence.current++
+    inspectingRef.current = false
+    setInspecting(false)
+    clearInspection()
+  }
+  const clearInspection = () => {
+    inspectSequence.current++
+    selectionLockedRef.current = false
+    setInspected(undefined)
+    setHovered(undefined)
+    setArea(undefined)
+    setDragArea(undefined)
+    dragStart.current = undefined
+    setAnnotation('')
+  }
+  const inspectAt = (clientX: number, clientY: number, select: boolean) => {
+    const point = pointAt(clientX, clientY, false)
+    const pageID = activePageRef.current
+    if (!point || !pageID) return
+    if (!source.inspectPoint) {
+      if (select) setNotice('当前数据源不支持元素选择')
+      return
+    }
+    const sequence = ++inspectSequence.current
+    void source.inspectPoint(sessionID, pageID, point.x, point.y, viewerID).then((element) => {
+      if (sequence !== inspectSequence.current || pageID !== activePageRef.current) return
+      if (select) { selectionLockedRef.current = true; setInspected(element); setHovered(undefined) }
+      else if (!dragStart.current) setHovered(element)
+    }).catch((error: Error) => { if (select) setNotice(error.message) })
+  }
+  const finishArea = (clientX: number, clientY: number) => {
+    const start = dragStart.current
+    dragStart.current = undefined
+    const end = pointAt(clientX, clientY, true)
+    if (!start || !end || !viewport) return false
+    const bounds = { x: Math.floor(Math.min(start.x, end.x)), y: Math.floor(Math.min(start.y, end.y)), width: Math.ceil(Math.abs(start.x - end.x)), height: Math.ceil(Math.abs(start.y - end.y)) }
+    if (bounds.width < 5 || bounds.height < 5) { setDragArea(undefined); return false }
+    const sourceCanvas = canvasRef.current
+    if (!sourceCanvas) return true
+    const sequence = ++inspectSequence.current
+    const pageID = activePageRef.current
+    const crop = document.createElement('canvas')
+    crop.width = bounds.width
+    crop.height = bounds.height
+    crop.getContext('2d')?.drawImage(sourceCanvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height)
+    crop.toBlob((image) => {
+      if (!image || sequence !== inspectSequence.current || pageID !== activePageRef.current || !inspectingRef.current) return
+      selectionLockedRef.current = true
+      setArea({ ...bounds, image })
+      setInspected(undefined)
+      setHovered(undefined)
+      setDragArea(undefined)
+    }, 'image/png')
+    return true
+  }
+  useEffect(() => { stopInspecting() }, [activePageID])
+
   const modifiers = (event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) =>
     (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
 
@@ -907,12 +964,14 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   }
 
   const onPageTouch = (action: 'start' | 'move' | 'end' | 'cancel', event: React.TouchEvent<HTMLDivElement>) => {
+    if (inspecting) { event.preventDefault(); return }
     if (!touchEnabled || !browserControllerRef.current || !liveViewEnabled || (event.target as HTMLElement).closest('button')) return
     event.preventDefault()
     touchInput(action, event)
   }
 
   const onPagePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspecting) { event.preventDefault(); return }
 
     // 触摸统一由 TouchEvent 处理。荣耀等 Android WebView 会同时派发
     // PointerEvent 与 TouchEvent，若两条路径并存会产生重复 touchStart。
@@ -940,6 +999,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   }
 
   const onPagePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspecting) return
     if (!mouseEnabled || !browserControllerRef.current || !liveViewEnabled || event.pointerType === 'touch') return
     const captured = event.currentTarget.hasPointerCapture?.(event.pointerId) || false
     const coalesced = event.nativeEvent.getCoalescedEvents?.()
@@ -958,6 +1018,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   }
 
   const finishPagePointer = (_action: 'up' | 'cancel', event: React.PointerEvent<HTMLDivElement>) => {
+    if (inspecting) { event.preventDefault(); return }
 
     if (!mouseEnabled || !browserControllerRef.current || !liveViewEnabled || event.pointerType === 'touch') return
     const point = pointAt(event.clientX, event.clientY, true)
@@ -975,6 +1036,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   }
 
   const sendKey = (action: 'down' | 'up', event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (inspecting) { if (event.key === 'Escape' && action === 'down') stopInspecting(); event.preventDefault(); return }
     if (!keyboardEnabled || !browserControllerRef.current) return
     if (composingRef.current || event.key === 'Process' || event.keyCode === 229) return
     const keyTokens = Array.from(new Set([event.code?.toLowerCase(), event.key.toLowerCase()].filter(Boolean) as string[]))
@@ -1074,6 +1136,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     const frame = frameRef.current
     if (!frame || !viewport || !wheelEnabled || !liveViewEnabled) return
     const onWheel = (event: WheelEvent) => {
+      if (inspectingRef.current && selectionLockedRef.current) { event.preventDefault(); return }
       if (!browserControllerRef.current) return
       const point = pointAt(event.clientX, event.clientY, false)
       if (!point) return
@@ -1093,14 +1156,14 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     if (!browserControllerRef.current || !liveViewEnabled || !sessionID || pageID === activePageID) return
     const selection = ++tabSelectionRef.current
     try {
-      await activateBrowserTab(sessionID, pageID, viewerID)
+      await source.activate(sessionID, pageID, viewerID)
       if (selection !== tabSelectionRef.current) return
       setWaitingForFrame(true)
       // 同一浏览器窗口内切换不清空画布：目标 Tab 有本地缓存时立即替换，
       // 没有缓存时继续显示上一帧，直到服务端首帧到达。
       const local = frameCacheRef.current.get(pageID)
       if (local) void drawFrame(local, pageID)
-      const state = await fetchBrowserState(sessionID)
+      const state = await source.state(sessionID)
       if (selection !== tabSelectionRef.current || !acceptState(state)) return
       activePageRef.current = state.active_page_id
       setTabs(state.tabs ?? [])
@@ -1111,7 +1174,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
         if (!expected || expected.pageID !== state.active_page_id || expected.width === state.viewport.width && expected.height === state.viewport.height) setViewport(state.viewport)
       }
       if (state.active_page_id) {
-        void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
+        void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
       }
       setNotice(undefined)
     } catch (error) {
@@ -1119,9 +1182,18 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     }
   }
 
+  const appliedSelectionRef = useRef<{ sessionID: string; pageID: string } | undefined>(undefined)
+  useEffect(() => {
+    if (!sessionID || !selectedPageID || !browserControl?.controller) return
+    const applied = appliedSelectionRef.current
+    if (applied?.sessionID === sessionID && applied.pageID === selectedPageID) return
+    appliedSelectionRef.current = { sessionID, pageID: selectedPageID }
+    if (selectedPageID !== activePageID) void selectTab(selectedPageID)
+  }, [sessionID, selectedPageID, browserControl?.controller])
+
   const syncAfterNavigation = async (pageID: string) => {
     if (!sessionID) return
-    const state = await fetchBrowserState(sessionID)
+    const state = await source.state(sessionID)
     if (!acceptState(state)) return
     activePageRef.current = state.active_page_id || pageID
     setTabs(state.tabs ?? [])
@@ -1129,7 +1201,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     setPageURL(state.url)
     if (state.viewport?.width && state.viewport.height) setViewport(state.viewport)
     setWaitingForFrame(true)
-    void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id || pageID, false)).catch(() => undefined)
+    void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id || pageID, false)).catch(() => undefined)
   }
 
   const navigateAddress = async () => {
@@ -1139,7 +1211,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     try {
       addressEditingRef.current = false
       setWaitingForFrame(true)
-      await navigateBrowserTab(sessionID, pageID, address, viewerID)
+      await source.navigate(sessionID, pageID, address, viewerID)
       await syncAfterNavigation(pageID)
       setNotice(undefined)
     } catch (error) {
@@ -1152,7 +1224,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     if (!browserControllerRef.current || !liveViewEnabled || !sessionID || !pageID) return
     try {
       setWaitingForFrame(true)
-      await reloadBrowserTab(sessionID, pageID, viewerID)
+      await source.reload(sessionID, pageID, viewerID)
       await syncAfterNavigation(pageID)
       setNotice(undefined)
     } catch (error) {
@@ -1163,10 +1235,10 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
   const removeTab = async (pageID: string) => {
     if (!browserControllerRef.current || !liveViewEnabled || !sessionID) return
     try {
-      await closeBrowserTab(sessionID, pageID, viewerID)
+      await source.closeTab(sessionID, pageID, viewerID)
       frameCacheRef.current.delete(pageID)
       viewportAppliedRef.current.delete(pageID)
-      const state = await fetchBrowserState(sessionID)
+      const state = await source.state(sessionID)
       if (!acceptState(state)) return
       if (state.active_page_id) activePageRef.current = state.active_page_id
       setTabs(state.tabs ?? [])
@@ -1179,7 +1251,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       if (state.active_page_id) {
         const local = frameCacheRef.current.get(state.active_page_id)
         if (local) void drawFrame(local, state.active_page_id)
-        void fetchCachedBrowserFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
+        void source.cachedFrame(sessionID).then((cached) => drawFrame(cached, state.active_page_id, false)).catch(() => undefined)
       } else {
         frameCacheRef.current.clear()
         activePageRef.current = undefined
@@ -1197,7 +1269,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     if (!sessionID || browserControllerRef.current || takingControl || controlRetryAfterMS > 0) return
     setTakingControl(true)
     try {
-      const state = await takeBrowserControl(sessionID, viewerID)
+      const state = await source.takeControl(sessionID, viewerID)
       applyBrowserControl(state)
       setNotice(undefined)
     } catch (error) {
@@ -1217,7 +1289,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     viewportAppliedRef.current.clear()
     onClose?.()
     try {
-      await closeBrowser(sessionID, viewerID)
+      await source.closeBrowser(sessionID, viewerID)
       setNotice('浏览器已关闭')
     } catch (error) {
       setNotice(error instanceof Error ? `关闭浏览器失败：${error.message}` : '关闭浏览器失败')
@@ -1229,16 +1301,19 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
 
   const activeTab = tabs.find((tab) => tab.page_id === activePageID)
   const controller = !readOnly && !busy && !closing && browserControl?.controller === true
+  const inspectionLocked = inspecting && Boolean(inspected || area)
   const showAddress = visible('toolbar') && visible('addressBar')
   const showReload = visible('toolbar') && visible('reload')
   const showNavigate = showAddress && visible('navigate')
   const showClose = visible('toolbar') && visible('closeBrowser') && liveViewEnabled && !readOnly
   const showDevtools = visible('toolbar') && visible('devtools') && devtoolsEnabled
-  const showToolbar = showAddress || showReload || showClose || showDevtools
+  const showInspect = visible('toolbar') && Boolean(onElementSelect || onAreaSelect)
+  const showToolbar = showAddress || showReload || showClose || showDevtools || showInspect
   const takeoverSeconds = Math.ceil(controlRetryAfterMS / 1000)
 
-  const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
-    {visible('tabs') && <div data-part="tabs" className={`browser-live-tab-list ${classNames?.tabs || ''}`} role="tablist" aria-label="浏览器 Tab 列表" inert={busy || closing || undefined}>
+  const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (inspecting) return; if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
+    {busy && <div className="browser-live-busy-overlay" role="status">Agent 正在操作浏览器…</div>}
+    {visible('tabs') && <div data-part="tabs" className={`browser-live-tab-list ${classNames?.tabs || ''}`} role="tablist" aria-label="浏览器 Tab 列表" inert={busy || closing || inspectionLocked || undefined}>
       {tabs.length === 0 && <span className="browser-live-tab-empty">没有可用页面</span>}
       {tabs.map((tab) => <div key={tab.page_id} data-part="tab" className={`browser-live-tab-row ${classNames?.tab || ''} ${tab.page_id === activePageID ? 'browser-live-tab-row-active' : ''} ${tab.status === 'loading' ? 'browser-live-tab-row-loading' : ''}`}>
         <button type="button" role="tab" disabled={!liveViewEnabled || !controller} aria-selected={tab.page_id === activePageID} aria-busy={tab.status === 'loading' || undefined} onClick={() => void selectTab(tab.page_id)} title={tab.url || tab.title || tab.page_id}>
@@ -1247,28 +1322,29 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
         </button>
         {liveViewEnabled && visible('closeTab') && <button type="button" className="browser-live-tab-close" disabled={!controller} aria-label={`关闭 ${tab.title || '浏览器 Tab'}`} onClick={() => void removeTab(tab.page_id)}><X size={12} /></button>}
       </div>)}
-      {!readOnly && liveViewEnabled && visible('newTab') && <button type="button" className="browser-new-tab" aria-label="新建浏览器 Tab" disabled={!controller} onClick={() => void newBrowserTab(sessionID, viewerID).catch((error: Error) => setNotice(error.message))}><Plus size={14} /></button>}
+      {!readOnly && liveViewEnabled && visible('newTab') && <button type="button" className="browser-new-tab" aria-label="新建浏览器 Tab" disabled={!controller} onClick={() => void source.newTab(sessionID, viewerID).catch((error: Error) => setNotice(error.message))}><Plus size={14} /></button>}
     </div>}
     {showToolbar && <header data-part="toolbar" className={`browser-live-window-header ${classNames?.toolbar || ''}`}>
       <div className="browser-live-address-row" inert={busy || closing || undefined} onPointerDown={(event) => { event.stopPropagation() }}>
         {showAddress && <i aria-hidden="true" />}
         {showAddress && <input
           aria-label="浏览器页面地址"
-          disabled={!liveViewEnabled || !controller}
+          disabled={!liveViewEnabled || !controller || inspectionLocked}
           value={addressValue}
-          placeholder="输入页面地址"
+          placeholder="输入网址或搜索"
           onFocus={() => { addressEditingRef.current = true }}
           onChange={(event) => setAddressValue(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void navigateAddress() } }}
           onBlur={() => { addressEditingRef.current = false; if (!addressValue.trim()) setAddressValue(pageURL || '') }}
           title={pageURL || '浏览器直播'}
         />}
-        {showReload && <button type="button" aria-label="刷新当前页面" disabled={!liveViewEnabled || !controller || !activePageID} onClick={() => void reloadActivePage()}><RefreshCw size={13} /></button>}
-        {showNavigate && <button type="button" aria-label="前往页面" disabled={!liveViewEnabled || !controller || !activePageID || !addressValue.trim()} onClick={() => void navigateAddress()}><ArrowRight size={13} /></button>}
+        {showReload && <button type="button" aria-label="刷新当前页面" disabled={!liveViewEnabled || !controller || !activePageID || inspectionLocked} onClick={() => void reloadActivePage()}><RefreshCw size={13} /></button>}
+        {showNavigate && <button type="button" aria-label="前往页面" disabled={!liveViewEnabled || !controller || !activePageID || !addressValue.trim() || inspectionLocked} onClick={() => void navigateAddress()}><ArrowRight size={13} /></button>}
       </div>
       <div>
-        {showClose && <button type="button" aria-label="关闭浏览器" disabled={!browserControl?.controller || closing} onClick={() => void close()}><X size={14} /></button>}
+        {showClose && <button type="button" aria-label="关闭浏览器" disabled={!browserControl?.controller || closing || inspectionLocked} onClick={() => void close()}><X size={14} /></button>}
         {showDevtools && <button type="button" aria-label="切换开发诊断 F12" aria-pressed={devtoolsPanelOpen} onClick={() => devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel()}><Code2 size={15} /></button>}
+        {showInspect && <button type="button" aria-label="选择页面元素" aria-pressed={inspecting} disabled={!controller || !hasFrame || busy} onClick={() => { if (inspecting) stopInspecting(); else { clearKeyboardState(); inputRef.current?.blur(); inspectingRef.current = true; setInspecting(true) } }}><MousePointer2 size={15} /></button>}
       </div>
     </header>}
     {<div className={`browser-live-panel-body browser-live-panel-${mobilePanel}`} inert={busy || closing || undefined} style={devtoolsHeight ? { '--browser-devtools-height': devtoolsHeight } as CSSProperties : undefined}>
@@ -1304,6 +1380,32 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
     >
       {keyboardEnabled && <textarea ref={inputRef} className="browser-live-window-ime" aria-label="浏览器直播键盘输入" tabIndex={-1} autoCapitalize="off" autoCorrect="off" spellCheck={false} onBlur={onInputBlur} inputMode={manualKeyboard && !mobileInputActive ? "none" : "text"} />}
       <canvas ref={canvasRef} className={hasFrame ? 'browser-live-window-canvas-ready' : ''} aria-label="浏览器页面当前画面" />
+      {inspecting && <div className={`browser-element-inspector ${inspected || area ? 'browser-element-inspector-locked' : ''}`} role="presentation"
+        onPointerMove={(event) => {
+          if (dragStart.current) {
+            const end = pointAt(event.clientX, event.clientY, true)
+            if (end) setDragArea({ x: Math.min(dragStart.current.x, end.x), y: Math.min(dragStart.current.y, end.y), width: Math.abs(dragStart.current.x - end.x), height: Math.abs(dragStart.current.y - end.y) })
+          } else if (onElementSelect && !inspected && !area) inspectAt(event.clientX, event.clientY, false)
+        }}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (inspected || area) return; const point = pointAt(event.clientX, event.clientY, false); if (point) { inspectSequence.current++; setHovered(undefined); dragStart.current = { x: point.x, y: point.y }; try { event.currentTarget.setPointerCapture?.(event.pointerId) } catch { /* 继续处理当前指针。 */ } } }}
+        onPointerUp={(event) => { event.stopPropagation(); if (dragStart.current) { ignoreInspectClick.current = true; try { event.currentTarget.releasePointerCapture?.(event.pointerId) } catch { /* 捕获未建立。 */ } if (!finishArea(event.clientX, event.clientY) && onElementSelect) inspectAt(event.clientX, event.clientY, true) } }}
+        onClick={(event) => { event.stopPropagation(); if (ignoreInspectClick.current) { ignoreInspectClick.current = false; return } if (inspected || area) clearInspection() }}
+        onWheel={(event) => { if (inspected || area) { event.preventDefault(); event.stopPropagation() } }}
+        onTouchStart={(event) => { if (inspected || area) event.preventDefault(); event.stopPropagation() }}
+        onKeyDown={(event) => { if (event.key === 'Escape') stopInspecting(); event.stopPropagation() }}
+      >
+        {(dragArea || area) && viewport && <div className="browser-element-inspector-outline browser-element-inspector-area" style={{ left: `${(dragArea || area)!.x / viewport.width * 100}%`, top: `${(dragArea || area)!.y / viewport.height * 100}%`, width: `${(dragArea || area)!.width / viewport.width * 100}%`, height: `${(dragArea || area)!.height / viewport.height * 100}%` }} />}
+        {!dragArea && !dragStart.current && !area && (inspected || hovered) && viewport && (() => {
+          const bounds = (inspected || hovered)!.bounds
+          return <div className="browser-element-inspector-outline" style={{ left: `${bounds.x / viewport.width * 100}%`, top: `${bounds.y / viewport.height * 100}%`, width: `${bounds.width / viewport.width * 100}%`, height: `${bounds.height / viewport.height * 100}%` }} />
+        })()}
+        {(inspected || area) ? <div className="browser-element-inspector-card" role="dialog" aria-label="选中页面内容" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') stopInspecting(); event.stopPropagation() }} onKeyUp={(event) => event.stopPropagation()}>
+          <strong>{area ? '已选区域' : inspected!.name || inspected!.role}</strong>
+          <small>{area ? `${area.width} × ${area.height} 像素` : `${inspected!.role} · ${inspected!.ref}`}</small>
+          <label>批注<textarea value={annotation} onChange={(event) => setAnnotation(event.target.value)} placeholder="描述要对这个元素做什么" /></label>
+          <div className="browser-element-inspector-actions"><button type="button" onClick={clearInspection}>取消</button><button type="button" onClick={() => { if (area && viewport) onAreaSelect?.({ pageID: activePageID!, url: pageURL || '', bounds: { x: area.x, y: area.y, width: area.width, height: area.height }, viewport, image: area.image, annotation }); else if (inspected) onElementSelect?.({ pageID: activePageID!, element: inspected, annotation }); clearInspection() }}>确认</button></div>
+        </div> : <span className="browser-element-inspector-hint">{onElementSelect ? '点击元素或拖动选择区域' : '拖动选择区域'} · Esc 退出</span>}
+      </div>}
       {visible('keyboard') && keyboardEnabled && liveViewEnabled && hasFrame && controller && <button
         type="button"
         className="browser-live-window-mobile-input"
@@ -1334,7 +1436,7 @@ function BrowserSurface({ endpoint: sessionID, className = '', style, classNames
       </div>
       {visible('devtoolsFloating') && devtoolsEnabled && !devtoolsPanelOpen && <button type="button" className="browser-devtools-panel-trigger" aria-label="打开开发诊断面板" onClick={openDevtoolsPanel}><span aria-hidden="true" />开发诊断</button>}
       {devtoolsEnabled && devtoolsPanelOpen && devtoolsOptions?.resizable !== false && <div className="browser-devtools-resizer" role="separator" aria-label="调整开发诊断高度" aria-orientation="horizontal" onPointerDown={startDevtoolsResize} onPointerMove={moveDevtoolsResize} onPointerUp={endDevtoolsResize} onPointerCancel={endDevtoolsResize} />}
-      {devtoolsEnabled && sessionID && <BrowserDevtoolsPanel className={classNames?.devtools} sessionID={sessionID} pageID={activePageID} viewerID={viewerID} controlEnabled={controller} hidden={!devtoolsPanelOpen} panels={devtoolsOptions?.panels} captureControl={devtoolsOptions?.captureControl} onClose={devtoolsOptions?.closeButton === false ? undefined : closeDevtoolsPanel} />}
+      {devtoolsEnabled && sessionID && <BrowserDevtoolsPanel source={source.diagnostics} className={classNames?.devtools} sessionID={sessionID} pageID={activePageID} viewerID={viewerID} controlEnabled={controller} hidden={!devtoolsPanelOpen} panels={devtoolsOptions?.panels} captureControl={devtoolsOptions?.captureControl} onClose={devtoolsOptions?.closeButton === false ? undefined : closeDevtoolsPanel} />}
     </div>}
     {notice && <div role="alert" className="browser-live-window-notice">{notice}</div>}
 

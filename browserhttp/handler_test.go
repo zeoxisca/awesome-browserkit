@@ -43,6 +43,9 @@ func (p *testPage) WaitIdle(context.Context, time.Duration) error { return nil }
 func (p *testPage) Screenshot(context.Context, browserkit.ScreenshotOptions) (browserkit.Screenshot, error) {
 	return browserkit.Screenshot{Data: []byte("jpeg"), Format: "jpeg"}, nil
 }
+func (p *testPage) InspectPoint(_ context.Context, x, y float64) (browserkit.InspectedElement, error) {
+	return browserkit.InspectedElement{Ref: "fixture_1", Revision: 1, Role: "button", Name: "Fixture", Bounds: browserkit.ElementBounds{X: x, Y: y, Width: 20, Height: 10}}, nil
+}
 func (p *testPage) DispatchInput(_ context.Context, event browserkit.InputEvent) error {
 	p.inputs <- event
 	return nil
@@ -198,6 +201,36 @@ func TestOriginAndReadOnlyPolicies(t *testing.T) {
 		if w.Code != 403 {
 			t.Fatalf("readonly %s: %d", path, w.Code)
 		}
+	}
+}
+
+func TestInspectPointRequiresControl(t *testing.T) {
+	m, _, opened := fixture(t)
+	path := "/tabs/" + opened.PageID + "/inspect"
+	_, leave, err := m.JoinViewer("controller", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer leave()
+	for _, test := range []struct {
+		name   string
+		h      http.Handler
+		viewer string
+		status int
+	}{
+		{"read only", NewHandler(m, Options{ReadOnly: true}), "controller", 403},
+		{"other viewer", NewHandler(m, Options{}), "other", 409},
+		{"controller", NewHandler(m, Options{}), "controller", 200},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := call(t, test.h, http.MethodPost, path, `{"x":10,"y":20}`, test.viewer)
+			if w.Code != test.status {
+				t.Fatalf("inspect status=%d body=%s", w.Code, w.Body.String())
+			}
+			if test.status == 200 && !strings.Contains(w.Body.String(), `"ref":"fixture_1"`) {
+				t.Fatalf("inspect response=%s", w.Body.String())
+			}
+		})
 	}
 }
 

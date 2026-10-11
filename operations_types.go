@@ -255,6 +255,18 @@ type ScreenshotRequest struct {
 	SessionID string `json:"session_id"`
 	PageID    string `json:"page_id"`
 	FullPage  bool   `json:"full_page,omitempty"`
+	// Region 使用截图时的页面视口 CSS 坐标；省略时截取整个页面。
+	Region *ScreenshotRegion `json:"region,omitempty"`
+}
+
+// ScreenshotRegion 描述待截取的页面视口区域及当时的视口尺寸。
+type ScreenshotRegion struct {
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+	Width          float64 `json:"width"`
+	Height         float64 `json:"height"`
+	ViewportWidth  float64 `json:"viewport_width"`
+	ViewportHeight float64 `json:"viewport_height"`
 }
 
 // ScreenshotResponse 是 browserScreenshot 的输出。

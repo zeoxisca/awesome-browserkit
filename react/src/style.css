@@ -231,3 +231,64 @@
 
 .browserkit .browser-devtools-header { height:35px; margin:0; padding:0 9px; }
 .browserkit .browser-devtools > footer { margin:0; padding:0 9px; }
+.browserkit .browser-live-busy-overlay { position: absolute; z-index: 20; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / 32%); color: #fff; font-size: var(--type-caption-size); pointer-events: auto; }
+.browserkit .browser-live-busy-overlay::first-line { padding: 8px 12px; }
+.browserkit .browser-element-inspector {
+  position: absolute;
+  z-index: 25;
+  inset: 0;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .08);
+  cursor: crosshair;
+  touch-action: pan-y;
+  user-select: none;
+}
+.browserkit .browser-element-inspector-locked { touch-action: none; }
+.browserkit .browser-element-inspector-outline {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid var(--blue-500);
+  background: color-mix(in srgb, var(--blue-300) 15%, transparent);
+}
+.browserkit .browser-element-inspector-area { border-style: dashed; }
+.browserkit .browser-element-inspector-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink-800);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;
+}
+.browserkit .browser-element-inspector-card {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: min(290px, calc(100% - 24px));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  color: var(--ink-900);
+  box-shadow: var(--shadow-popover);
+  cursor: default;
+}
+.browserkit .browser-element-inspector-card small { color: var(--ink-500); overflow: hidden; text-overflow: ellipsis; }
+.browserkit .browser-element-inspector-card label { display: grid; gap: 4px; color: var(--ink-700); }
+.browserkit .browser-element-inspector-card select,
+.browserkit .browser-element-inspector-card textarea {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+}
+.browserkit .browser-element-inspector-card textarea { min-height: 64px; resize: vertical; }
+.browserkit .browser-element-inspector-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.browserkit .browser-element-inspector-actions button { padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink-800); cursor: pointer; }
