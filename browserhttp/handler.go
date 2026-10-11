@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"git.in.chaitin.net/xiaochen.zhang/awsome-browserkit"
+	"github.com/zeoxisca/awesome-browserkit"
 	xwebsocket "golang.org/x/net/websocket"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -255,7 +255,7 @@ func (h *Handler) tab(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) inspectPoint(w http.ResponseWriter, r *http.Request) {
-	if !h.live(w) {
+	if !h.live(w) || !h.writable(w, r) {
 		return
 	}
 	var point struct {

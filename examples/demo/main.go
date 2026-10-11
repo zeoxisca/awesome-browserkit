@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"git.in.chaitin.net/xiaochen.zhang/awsome-browserkit"
-	"git.in.chaitin.net/xiaochen.zhang/awsome-browserkit/browserhttp"
+	"github.com/zeoxisca/awesome-browserkit"
+	"github.com/zeoxisca/awesome-browserkit/browserhttp"
 )
 
 func main() {

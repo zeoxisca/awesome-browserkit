@@ -1,4 +1,4 @@
-module git.in.chaitin.net/xiaochen.zhang/awsome-browserkit
+module github.com/zeoxisca/awesome-browserkit
 
 go 1.25.8
 

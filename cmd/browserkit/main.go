@@ -15,7 +15,7 @@ import (
 	"strings"
 	"syscall"
 
-	browserkit "git.in.chaitin.net/xiaochen.zhang/awsome-browserkit"
+	browserkit "github.com/zeoxisca/awesome-browserkit"
 )
 
 type callRequest struct {

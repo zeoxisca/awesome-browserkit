@@ -227,6 +227,28 @@ describe('BrowserLiveWindow', () => {
     expect(screen.getByRole('button', { name: '选择页面元素' })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('discards a pending region image after selection is cancelled', async () => {
+    mockedFetchBrowserState.mockResolvedValue(singleTabState())
+    let finishImage: BlobCallback | undefined
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => { finishImage = callback })
+    render(<BrowserView endpoint="/browser" onAreaSelect={vi.fn()} />)
+    await configuredFrame()
+    fireEvent.click(screen.getByRole('button', { name: '选择页面元素' }))
+    const overlay = document.querySelector('.browser-element-inspector')!
+    const drag = (type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, { clientX: { value: x }, clientY: { value: y }, pointerId: { value: 7 }, pointerType: { value: 'mouse' }, button: { value: 0 }, buttons: { value: 1 } })
+      return event
+    }
+    fireEvent(overlay, drag('pointerdown', 100, 120))
+    fireEvent(overlay, drag('pointerup', 220, 200))
+    expect(finishImage).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '选择页面元素' }))
+    await act(async () => { finishImage?.(new Blob(['png'], { type: 'image/png' })) })
+    expect(screen.queryByRole('dialog', { name: '选中页面内容' })).toBeNull()
+    expect(document.querySelector('.browser-element-inspector')).toBeNull()
+  })
+
   it('hides all controls while retaining the live canvas and caller styles', async () => {
     mockedFetchBrowserState.mockResolvedValue(singleTabState())
     render(<BrowserView endpoint="/browser" controls={false} className="embedded" style={{ height: 320 }} />)

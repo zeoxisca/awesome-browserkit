@@ -50,6 +50,7 @@ The surrounding workspace and page contents are illustrative. The embedded panel
 | **Attach to an existing browser** | Connect to an authorized Chrome / Chromium instance with its cookies, signed-in sessions, and page context. Attach to the active tab by default; disconnecting preserves the browser and its tabs. |
 | **Isolated browser environments** | The CLI's `new` mode launches a headless browser with a temporary profile. Cookies and local storage are isolated from the everyday browser and other client processes. The profile is removed on exit. |
 | **Agent page operations** | Snapshots provide page text, element references, and revision information. Click, hover, type, press keys, navigate, wait, capture screenshots, and manage tabs through functions that can be registered as tools in a host framework. |
+| **Element and region selection** | The React view can let a controller select a page element or drag a region and attach an annotation. Element selection returns a revision-bound ref for later agent operations; region selection returns viewport coordinates and a PNG Blob. The Go screenshot API can also crop a viewport region. |
 | **Live frame streaming** | Browser frames travel over WebSocket and scale to the component container. Go quality presets configure frame rate and JPEG quality. Slow connections skip older frames to limit backlog. |
 | **Remote visual interaction** | The React interface includes tabs, an address bar, mouse, touch, wheel, keyboard, and IME input. Input is executed on the browser host; resulting page changes return through the frame stream. |
 | **Shared viewing and control** | Multiple clients can observe a session, with input coordinated through control ownership. Users can take control, while server-enforced read-only endpoints support observation of agent activity. |
@@ -268,6 +269,7 @@ export function BrowserPanel() {
 ```
 
 See the [React API](react/README.md) for UI, input, and diagnostic options.
+Pass `onElementSelect` or `onAreaSelect` to show the selection button. Only the browser controller can inspect elements; the host receives the result and decides how to use the selected ref, region image, and annotation. `Manager.InspectPoint` and `POST /tabs/{pageID}/inspect` provide element selection to Go and HTTP clients. `ScreenshotRequest.Region` crops a screenshot using the viewport dimensions captured when the region was selected; it cannot be combined with `FullPage`.
 The default `httpBrowserSource` connects to the BrowserKit HTTP/WebSocket endpoint. For a custom transport, pass a `BrowserSource`; `endpoint` then serves as the identifier passed to its methods, and optional `pageID` selects a page when the host manages tabs. To mount an independent React root, run `npm run build:standalone --prefix react`, load `react/standalone/browser.js` and `react/standalone/react.css`, and call the module's `mountBrowserView(element, props)` export.
 The detailed API and Skill documentation are currently in Chinese.
 

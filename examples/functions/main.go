@@ -8,7 +8,7 @@ import (
 	"log"
 	"time"
 
-	"git.in.chaitin.net/xiaochen.zhang/awsome-browserkit"
+	"github.com/zeoxisca/awesome-browserkit"
 )
 
 // hostContext 模拟宿主已有的工具上下文；浏览器库不依赖这个类型。

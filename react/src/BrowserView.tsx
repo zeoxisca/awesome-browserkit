@@ -840,8 +840,12 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     const point = pointAt(clientX, clientY, false)
     const pageID = activePageRef.current
     if (!point || !pageID) return
+    if (!source.inspectPoint) {
+      if (select) setNotice('当前数据源不支持元素选择')
+      return
+    }
     const sequence = ++inspectSequence.current
-    void source.inspectPoint(sessionID, pageID, point.x, point.y).then((element) => {
+    void source.inspectPoint(sessionID, pageID, point.x, point.y, viewerID).then((element) => {
       if (sequence !== inspectSequence.current || pageID !== activePageRef.current) return
       if (select) { selectionLockedRef.current = true; setInspected(element); setHovered(undefined) }
       else if (!dragStart.current) setHovered(element)
@@ -856,11 +860,20 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
     if (bounds.width < 5 || bounds.height < 5) { setDragArea(undefined); return false }
     const sourceCanvas = canvasRef.current
     if (!sourceCanvas) return true
+    const sequence = ++inspectSequence.current
+    const pageID = activePageRef.current
     const crop = document.createElement('canvas')
     crop.width = bounds.width
     crop.height = bounds.height
     crop.getContext('2d')?.drawImage(sourceCanvas, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height)
-    crop.toBlob((image) => { if (image) { selectionLockedRef.current = true; setArea({ ...bounds, image }); setInspected(undefined); setHovered(undefined); setDragArea(undefined) } }, 'image/png')
+    crop.toBlob((image) => {
+      if (!image || sequence !== inspectSequence.current || pageID !== activePageRef.current || !inspectingRef.current) return
+      selectionLockedRef.current = true
+      setArea({ ...bounds, image })
+      setInspected(undefined)
+      setHovered(undefined)
+      setDragArea(undefined)
+    }, 'image/png')
     return true
   }
   useEffect(() => { stopInspecting() }, [activePageID])
@@ -1294,7 +1307,8 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
   const showNavigate = showAddress && visible('navigate')
   const showClose = visible('toolbar') && visible('closeBrowser') && liveViewEnabled && !readOnly
   const showDevtools = visible('toolbar') && visible('devtools') && devtoolsEnabled
-  const showToolbar = showAddress || showReload || showClose || showDevtools
+  const showInspect = visible('toolbar') && Boolean(onElementSelect || onAreaSelect)
+  const showToolbar = showAddress || showReload || showClose || showDevtools || showInspect
   const takeoverSeconds = Math.ceil(controlRetryAfterMS / 1000)
 
   const content = <section ref={setPanelHost} data-part="root" className={`browserkit ${className} browser-live-window browser-live-window-side-panel ${devtoolsEnabled ? 'browser-live-window-devtools-enabled' : ''} ${devtoolsPanelOpen ? 'browser-live-window-devtools-open' : ''} ${devtoolsOptions?.resizable === false ? 'browser-live-window-devtools-fixed' : ''}   ${syncing ? 'browser-live-window-syncing' : ''} `} style={style} aria-busy={busy || closing || undefined} aria-label={liveViewEnabled ? syncing ? '浏览器页面直播（同步中）' : '浏览器页面直播' : '浏览器开发诊断'} onKeyDownCapture={(event) => { if (inspecting) return; if (devtoolsEnabled && devtoolsOptions?.shortcut !== false && event.key === "F12") { event.preventDefault(); event.stopPropagation(); devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel() } }}>
@@ -1330,7 +1344,7 @@ function BrowserSurface({ endpoint: sessionID, source = httpBrowserSource, pageI
       <div>
         {showClose && <button type="button" aria-label="关闭浏览器" disabled={!browserControl?.controller || closing || inspectionLocked} onClick={() => void close()}><X size={14} /></button>}
         {showDevtools && <button type="button" aria-label="切换开发诊断 F12" aria-pressed={devtoolsPanelOpen} onClick={() => devtoolsPanelOpen ? closeDevtoolsPanel() : openDevtoolsPanel()}><Code2 size={15} /></button>}
-        {(onElementSelect || onAreaSelect) && <button type="button" aria-label="选择页面元素" aria-pressed={inspecting} disabled={!controller || !hasFrame || busy} onClick={() => { if (inspecting) stopInspecting(); else { clearKeyboardState(); inputRef.current?.blur(); inspectingRef.current = true; setInspecting(true) } }}><MousePointer2 size={15} /></button>}
+        {showInspect && <button type="button" aria-label="选择页面元素" aria-pressed={inspecting} disabled={!controller || !hasFrame || busy} onClick={() => { if (inspecting) stopInspecting(); else { clearKeyboardState(); inputRef.current?.blur(); inspectingRef.current = true; setInspecting(true) } }}><MousePointer2 size={15} /></button>}
       </div>
     </header>}
     {<div className={`browser-live-panel-body browser-live-panel-${mobilePanel}`} inert={busy || closing || undefined} style={devtoolsHeight ? { '--browser-devtools-height': devtoolsHeight } as CSSProperties : undefined}>

@@ -38,7 +38,7 @@ export interface BrowserSource {
     close: () => void
   }): BrowserInputConnection
   activate(sessionID: string, pageID: string, viewerID: string): Promise<void>
-  inspectPoint(sessionID: string, pageID: string, x: number, y: number): Promise<BrowserInspectedElement>
+  inspectPoint?(sessionID: string, pageID: string, x: number, y: number, viewerID: string): Promise<BrowserInspectedElement>
   navigate(sessionID: string, pageID: string, url: string, viewerID: string): Promise<void>
   reload(sessionID: string, pageID: string, viewerID: string): Promise<void>
   newTab(sessionID: string, viewerID: string): Promise<void>
@@ -91,9 +91,9 @@ export const httpBrowserSource: BrowserSource = {
     return socket
   },
   activate: (sessionID, pageID, viewerID) => activateBrowserTab(sessionID, pageID, viewerID),
-  inspectPoint: async (sessionID, pageID, x, y) => {
+  inspectPoint: async (sessionID, pageID, x, y, viewerID) => {
     const response = await fetch(`${sessionID.replace(/\/$/, '')}/tabs/${encodeURIComponent(pageID)}/inspect`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ x, y }), credentials: 'include',
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Browserkit-Viewer': viewerID }, body: JSON.stringify({ x, y }), credentials: 'include',
     })
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || '元素选择失败')
     return response.json() as Promise<BrowserInspectedElement>

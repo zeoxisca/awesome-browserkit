@@ -63,6 +63,10 @@ export function Workspace() {
 | `viewerID` | 默认每实例生成；同一实例重连保持身份 |
 | `onStateChange` | 浏览器完整状态更新回调 |
 | `onError` | 请求或操作错误回调 |
+| `onElementSelect` | 控制方点击页面元素并确认后，返回页面 ID、含版本号的元素 ref 与批注；启用元素选择按钮 |
+| `onAreaSelect` | 控制方拖出区域并确认后，返回页面 ID、URL、视口坐标、视口尺寸、PNG `Blob` 与批注；启用区域选择按钮 |
+
+两种回调可同时传入。选择过程中可继续滚动页面；选定后会暂停远端输入，取消或确认即可继续。按 Esc 退出选择模式。元素 ref 与页面版本绑定，页面变化后应重新选择。区域图片来自当前实时画面，宿主应在回调中保存或上传 `Blob`。若需由 Go 端重新截图，可将 `bounds` 和 `viewport` 转成 `ScreenshotRequest.Region`；该字段不能与 `FullPage` 同时使用。
 
 同一应用页面可以嵌入多个组件实例。
 `endpoint` 变化时，组件清理上一目标的连接、输入和画面。
@@ -71,7 +75,7 @@ export function Workspace() {
 
 ## 自定义接入
 
-宿主已有浏览器后端或自己的传输层时，实现从包根导出的 `BrowserSource` 并传入 `source`。组件会将 `endpoint` 原样传给数据源方法，因此自定义场景可使用会话 ID。接口包含状态读取和订阅、缓存帧、实时帧与输入连接、Tab 操作、操作权、视口、关闭浏览器及 `diagnostics`；完整方法签名以导出的 TypeScript 类型为准。`BrowserInputConnection` 需提供 `readyState`、`bufferedAmount`、`send` 和 `close`。
+宿主已有浏览器后端或自己的传输层时，实现从包根导出的 `BrowserSource` 并传入 `source`。组件会将 `endpoint` 原样传给数据源方法，因此自定义场景可使用会话 ID。接口包含状态读取和订阅、缓存帧、实时帧与输入连接、Tab 操作、操作权、视口、关闭浏览器及 `diagnostics`；元素选择还需实现可选的 `inspectPoint` 方法，接收 `viewerID` 以验证操作权。完整方法签名以导出的 TypeScript 类型为准。`BrowserInputConnection` 需提供 `readyState`、`bufferedAmount`、`send` 和 `close`。
 
 ```tsx
 import { BrowserView, type BrowserSource } from '@browserkit/react'

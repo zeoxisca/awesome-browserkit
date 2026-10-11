@@ -49,6 +49,7 @@ Agent 可通过 CLI 或 Go 函数读取页面、操作元素和管理 Tab；用�
 | **已有环境接管** | 连接已授权的 Chrome / Chromium，使用现有 Cookie、登录态和页面上下文。默认绑定激活 Tab，断开连接后保留浏览器与页面。 |
 | **独立浏览器环境** | CLI 的 `new` 模式创建临时 profile，在无头浏览器中执行任务。Cookie 和本地存储与日常浏览器及其他 client 进程隔离，退出时清理。 |
 | **面向 Agent 的页面操作** | 页面快照提供文本、元素引用和版本信息。支持点击、悬停、文本输入、按键、导航、等待、截图与 Tab 管理，可封装为宿主框架的 Function Tool。 |
+| **元素与区域选择** | 控制方可以在 React 画面中选取元素或拖拽区域并填写批注。元素结果包含可供后续操作的版本化 ref；区域结果包含视口坐标和 PNG Blob。Go 截图接口也支持按视口区域裁剪。 |
 | **实时图流** | 通过 WebSocket 传输浏览器渲染帧，按容器尺寸显示。Go 端可配置帧率与 JPEG 质量档位，慢连接跳过旧帧，减少画面积压。 |
 | **远程可视化操作** | React 界面提供 Tab 栏、地址栏、鼠标、触摸、滚轮、键盘和中文输入法。操作发往浏览器所在机器，页面变化通过图流回传。 |
 | **协作与观察** | 多个客户端可观看同一会话，通过操作权协调输入。支持用户接管与服务端只读观察入口，适合展示 Agent 执行过程。 |
@@ -264,6 +265,7 @@ export function BrowserPanel() {
 ```
 
 组件区域、输入和诊断配置见 [React API](react/README.md)。
+传入 `onElementSelect` 或 `onAreaSelect` 后会显示选择按钮。只有浏览器控制方可检查元素；宿主收到元素 ref、区域图片和批注后自行决定用途。Go 端可调用 `Manager.InspectPoint`，HTTP 端可调用 `POST /tabs/{pageID}/inspect`。`ScreenshotRequest.Region` 使用选择区域时的视口尺寸裁剪截图，不能与 `FullPage` 同时使用。
 默认的 `httpBrowserSource` 使用 BrowserKit HTTP/WebSocket 入口。接入宿主已有浏览器传输层时，可传入 `BrowserSource`；此时 `endpoint` 是传给数据源方法的标识，宿主自行管理 Tab 时还可指定 `pageID`。独立挂载 React 根可运行 `npm run build:standalone --prefix react`，加载 `react/standalone/browser.js` 和 `react/standalone/react.css`，再调用模块导出的 `mountBrowserView(element, props)`。
 
 <a id="react-install"></a>
