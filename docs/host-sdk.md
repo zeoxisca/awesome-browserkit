@@ -111,6 +111,16 @@ Chromium 的 `downloadWillBegin` 只有下载身份、frame 和 URL，没有 req
 
 `DownloadMaxBytes=0` 不限大小；正数在 CDP 进度事件中检查并取消超限下载，完成时再按实际文件大小核对。进度事件有间隔，预算不是磁盘占用的硬上限，收到并取消前可能短暂超出。部分文件保存在 session 独立临时目录，失败/取消后删除，宿主关闭也会清理。完整文件归宿主持有，关闭不会删除完整文件。下载状态仅在 session 生命周期内保存；Manager 摘除已关闭 session 后不再提供其查询入口。
 
+宿主可在保留现有 session、Tab 和 Cookie 的同时更新下载限额：
+
+```go
+if err := manager.SetDownloadMaxBytes(16 << 20); err != nil {
+    return err
+}
+```
+
+更新应用于已有和未来 session 中随后开始的下载，每个下载在收到 `downloadWillBegin` 时固定自己的限额；进行中的下载继续使用开始时的值。传 `0` 恢复不限大小，负数以及 Manager 关闭后的更新会报错。自定义 `SessionFactory` 应在每个下载开始时调用 `SessionConfig.CurrentDownloadMaxBytes()` 并保存该值；直接使用 `NewSession` 时，此方法返回原配置的 `DownloadMaxBytes`。
+
 自动下载的 `TargetID` 通过真实 frame tree 异步核对；来源 frame 过快销毁时可能为空，仍保留实际 `FrameID`，不会猜成当前 Tab。按 `PageID` 筛选时不含尚未核实归属的下载。
 
 ## frame、观察与执行事实

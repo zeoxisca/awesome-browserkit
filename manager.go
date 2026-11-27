@@ -33,6 +33,7 @@ type Manager struct {
 	idleCheckInterval time.Duration
 	timing            timing
 	sequence          atomic.Uint64
+	downloadMaxBytes  atomic.Int64
 	// interactiveUntil 在用户输入后短暂放开直播帧间隔，优先保证跟手；
 	// 停顿后自然回到档位帧率。interactiveWake 用于立即唤醒图流发布。
 	interactiveUntil  atomic.Int64
@@ -178,6 +179,7 @@ func newManager(config Config, timing timing) (*Manager, error) {
 		replays:           make(map[string]*sequenceReplayState),
 		interactiveWake:   make(chan struct{}, 1),
 	}
+	manager.downloadMaxBytes.Store(config.DownloadMaxBytes)
 	for _, origin := range config.AllowedOrigins {
 		key, err := allowedOriginKey(origin)
 		if err != nil {
@@ -373,6 +375,8 @@ func (manager *Manager) createSession(ctx context.Context, request OpenRequest, 
 }
 
 func (manager *Manager) createSessionWithConfig(ctx context.Context, request OpenRequest, attach bool, sessionConfig SessionConfig) (*session, *page, OpenLoadStatus, error) {
+	sessionConfig.DownloadMaxBytes = manager.downloadMaxBytes.Load()
+	sessionConfig.downloadLimit = manager.downloadMaxBytes.Load
 	browser, err := manager.config.Factory(ctx, sessionConfig)
 	if err != nil {
 		return nil, nil, "", err

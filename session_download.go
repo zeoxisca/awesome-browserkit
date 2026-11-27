@@ -33,6 +33,7 @@ type downloadRecord struct {
 	done          chan struct{}
 	stopReason    string
 	cancelPending bool
+	maxBytes      int64
 }
 
 func (session *rodSession) startDownloadWatcher() {
@@ -52,9 +53,13 @@ func (session *rodSession) downloadWillBegin(event *proto.BrowserDownloadWillBeg
 		session.downloadMu.Unlock()
 		return
 	}
+	maxBytes := session.downloadMaxBytes
+	if session.downloadLimit != nil {
+		maxBytes = session.downloadLimit()
+	}
 	record := &downloadRecord{
 		info:  DownloadInfo{ID: event.GUID, State: DownloadInProgress, FrameID: string(event.FrameID), URL: event.URL},
-		begin: event, done: make(chan struct{}),
+		begin: event, done: make(chan struct{}), maxBytes: maxBytes,
 	}
 	session.downloadGuids[event.GUID] = record
 	session.downloadMu.Unlock()
@@ -119,7 +124,7 @@ func (session *rodSession) downloadProgress(event *proto.BrowserDownloadProgress
 	if total := int64(event.TotalBytes); total > record.info.TotalBytes {
 		record.info.TotalBytes = total
 	}
-	if session.downloadMaxBytes > 0 && record.info.Bytes > session.downloadMaxBytes && !record.cancelPending {
+	if record.maxBytes > 0 && record.info.Bytes > record.maxBytes && !record.cancelPending {
 		record.stopReason = DownloadOverLimit
 		record.cancelPending = true
 		go session.stopDownload(event.GUID, DownloadOverLimit)
@@ -131,7 +136,7 @@ func (session *rodSession) downloadProgress(event *proto.BrowserDownloadProgress
 			session.removePartialDownload(event.GUID)
 			return
 		}
-		info, err := finalizeDownloadTo(session.downloadTempDir, session.downloadDir, record.begin, session.downloadMaxBytes)
+		info, err := finalizeDownloadTo(session.downloadTempDir, session.downloadDir, record.begin, record.maxBytes)
 		if err != nil {
 			state := DownloadFailed
 			if errors.Is(err, errDownloadOverLimit) {

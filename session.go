@@ -38,9 +38,19 @@ type SessionConfig struct {
 	DownloadDir string
 	// DownloadMaxBytes 限制每个下载的字节数；零值不限大小。
 	DownloadMaxBytes int64
+	downloadLimit    func() int64
 	// OperationTimeout 限制每次 BrowserKit 操作的最长执行时间；省略时使用 30 秒。
 	OperationTimeout time.Duration
 	requestPolicy    *browserNetworkPolicy
+}
+
+// CurrentDownloadMaxBytes returns the current host download limit. Custom
+// SessionFactory implementations should snapshot it when each download begins.
+func (config SessionConfig) CurrentDownloadMaxBytes() int64 {
+	if config.downloadLimit != nil {
+		return config.downloadLimit()
+	}
+	return config.DownloadMaxBytes
 }
 
 // Cookie 是不含敏感值的浏览器 Cookie 元数据。
@@ -133,6 +143,7 @@ type rodSession struct {
 	downloadDir       string
 	downloadTempDir   string
 	downloadMaxBytes  int64
+	downloadLimit     func() int64
 	downloadGuids     map[string]*downloadRecord
 	tabEventsOnce     sync.Once
 	tabChanges        chan struct{}
@@ -341,6 +352,7 @@ func NewSession(ctx context.Context, config SessionConfig) (result Session, err 
 	if config.DownloadDir != "" {
 		session.downloadDir = config.DownloadDir
 		session.downloadMaxBytes = config.DownloadMaxBytes
+		session.downloadLimit = config.CurrentDownloadMaxBytes
 		session.downloadGuids = make(map[string]*downloadRecord)
 		session.downloadTempDir, err = os.MkdirTemp(config.DownloadDir, ".browserkit-")
 		if err != nil {
